@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <annotationProcessing>
+      <profile name="Maven default annotation processors profile" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <module name="kafka-ms-pattern" />
+        <module name="kafka-ms-reward" />
+        <module name="kafka-ms-storage" />
+        <module name="kafka-ms-sample" />
+        <module name="kafka-ms-order" />
+      </profile>
+    </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="kafka-ms-order" target="17" />
+      <module name="kafka-ms-pattern" target="17" />
+      <module name="kafka-ms-reward" target="17" />
+      <module name="kafka-ms-sample" target="17" />
+      <module name="kafka-ms-storage" target="17" />
+    </bytecodeTargetLevel>
+  </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="kafka-ms-order" options="-parameters" />
+      <module name="kafka-ms-pattern" options="-parameters" />
+      <module name="kafka-ms-reward" options="-parameters" />
+      <module name="kafka-ms-sample" options="-parameters" />
+      <module name="kafka-ms-storage" options="-parameters" />
+    </option>
+  </component>
+</project>

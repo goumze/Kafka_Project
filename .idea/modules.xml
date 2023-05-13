@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/Kafka_Project.iml" filepath="$PROJECT_DIR$/.idea/Kafka_Project.iml" />
+      <module fileurl="file://$PROJECT_DIR$/kafka-ms-order/kafka-ms-order.iml" filepath="$PROJECT_DIR$/kafka-ms-order/kafka-ms-order.iml" />
+      <module fileurl="file://$PROJECT_DIR$/kafka-ms-pattern/kafka-ms-pattern.iml" filepath="$PROJECT_DIR$/kafka-ms-pattern/kafka-ms-pattern.iml" />
+      <module fileurl="file://$PROJECT_DIR$/kafka-ms-reward/kafka-ms-reward.iml" filepath="$PROJECT_DIR$/kafka-ms-reward/kafka-ms-reward.iml" />
+      <module fileurl="file://$USER_HOME$/Downloads/kafka-ms-sample/kafka-ms-sample.iml" filepath="$USER_HOME$/Downloads/kafka-ms-sample/kafka-ms-sample.iml" />
+      <module fileurl="file://$PROJECT_DIR$/kafka-ms-storage/kafka-ms-storage.iml" filepath="$PROJECT_DIR$/kafka-ms-storage/kafka-ms-storage.iml" />
+    </modules>
+  </component>
+</project>
