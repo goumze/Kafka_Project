@@ -17,20 +17,20 @@ COPY src ./src
 RUN mvn clean package -DskipTests --no-transfer-progress -q
 
 # ── Stage 2: Runtime image ───────────────────────────────────────────────────
-FROM eclipse-temurin:21-jre-jammy
+FROM amazoncorretto:21
 
 LABEL maintainer="kafka-project" \
       description="Spring Boot + Apache Kafka 3.9.0 (KRaft) in a single plug-and-play container"
 
 WORKDIR /opt
 
-# Install minimal runtime utilities
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+# Install minimal runtime utilities (Amazon Linux 2023 uses dnf)
+RUN dnf install -y --setopt=install_weak_deps=False \
         wget \
-        netcat-openbsd \
+        nmap-ncat \
         ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+    dnf clean all && \
+    rm -rf /var/cache/dnf
 
 # ── Download and install Apache Kafka 3.9.0 (KRaft) ─────────────────────────
 ENV KAFKA_VERSION=3.9.0
