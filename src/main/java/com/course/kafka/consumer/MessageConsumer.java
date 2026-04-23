@@ -21,7 +21,9 @@ public class MessageConsumer {
             groupId = "${spring.kafka.consumer.group-id}"
     )
     public void consume(String message) {
-        log.info("Message consumed: '{}'", message);
+        log.info("Message consumed [{}]: '{}'",
+                Thread.currentThread().isVirtual() ? "virtual" : "platform",
+                message);
         receivedMessages.add(message);
     }
 
