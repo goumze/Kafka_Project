@@ -89,12 +89,15 @@ graph TD
                 BROKER --> TOPIC
             end
 
-            subgraph SpringBoot["Spring Boot 3.3 · :8080"]
-                CTRL["MessageController\nREST API"]
-                PROD["MessageProducer"]
-                CONS["MessageConsumer"]
+            subgraph SpringBoot["Spring Boot 3.3 · :8080 · Java 21 Virtual Threads"]
+                CTRL["MessageController\nREST API\n(virtual Tomcat thread)"]
+                PROD["MessageProducer\n(callback on virtual thread)"]
+                CONS["MessageConsumer\n(virtual Kafka listener thread)"]
+                VTC["VirtualThreadConfig\n(Executor beans)"]
                 CTRL --> PROD
                 CONS --> CTRL
+                VTC -.->|configures| PROD
+                VTC -.->|configures| CONS
             end
 
             PROD -- "publish" --> TOPIC
@@ -114,6 +117,26 @@ graph TD
         S5 --> S6["6. Start Spring Boot"]
     end
 ```
+
+### Virtual threads
+
+All async layers run on **Java 21 virtual threads** (Project Loom):
+
+```mermaid
+graph LR
+    subgraph VT["Virtual Thread Layers"]
+        A["spring.threads.virtual.enabled=true\n↳ Tomcat HTTP handler threads"]
+        B["VirtualThreadConfig\nSimpleAsyncTaskExecutor(virtualThreads=true)\n↳ Kafka @KafkaListener threads"]
+        C["VirtualThreadConfig\nExecutors.newVirtualThreadPerTaskExecutor()\n↳ Producer send callbacks"]
+    end
+    A & B & C --> JVM["JVM · Java 21\n(carrier thread pool)"]  
+```
+
+| Layer | Mechanism | Log thread name |
+|---|---|---|
+| Tomcat HTTP | `spring.threads.virtual.enabled: true` | `omcat-handler-N` |
+| Kafka listeners | `SimpleAsyncTaskExecutor(virtualThreads=true)` | `kafka-vt-listener-N` |
+| Producer callbacks | `whenCompleteAsync(..., virtualThreadExecutor)` | `virtual-N` |
 
 ### Message flow
 
@@ -141,6 +164,8 @@ sequenceDiagram
 ## Test Results
 
 All tests were run against the live container on **2026-04-23** after building with the single-stage Dockerfile (no Java/Maven required on the host).
+
+> **Update 2026-04-23:** Virtual threads enabled across all async layers (see [Virtual threads](#virtual-threads) section). Re-tested after rebuild — all tests still pass and virtual thread log output confirmed.
 
 ### Build
 
@@ -195,6 +220,39 @@ sequenceDiagram
     API-->>Tester: 200 ["Hello Kafka from Docker!","Order placed for item 42"]
 ```
 
+### Virtual threads test
+
+Published a message after enabling virtual threads and inspected container logs:
+
+```
+# Request
+curl -X POST http://localhost:8080/api/messages/publish \
+     -H "Content-Type: application/json" \
+     -d '{"message":"virtual thread test"}'
+
+# Response
+{"status":"published","message":"virtual thread test"}
+```
+
+**Log output confirming virtual threads on all layers:**
+
+```
+INFO  [kafka-project] [           main] c.c.kafka.config.VirtualThreadConfig
+  : Kafka listener container factory configured with virtual-thread executor
+
+INFO  [kafka-project] [     virtual-47] c.course.kafka.producer.MessageProducer
+  : [virtual] Message published: 'virtual thread test' | topic='messages' partition=2 offset=0
+
+INFO  [kafka-project] [a-vt-listener-1] c.course.kafka.consumer.MessageConsumer
+  : [virtual] Message consumed on thread 'kafka-vt-listener-1': 'virtual thread test'
+```
+
+| Layer | Thread name in log | Virtual? |
+|---|---|---|
+| Producer send callback | `virtual-47` | ✅ `[virtual]` |
+| Kafka consumer listener | `kafka-vt-listener-1` | ✅ `[virtual]` |
+| Tomcat HTTP handler | `omcat-handler-0` | ✅ (via `spring.threads.virtual.enabled`) |
+
 ---
 
 ## Project Structure
@@ -211,7 +269,8 @@ sequenceDiagram
 └── src/main/java/com/course/kafka/
     ├── KafkaProjectApplication.java
     ├── config/
-    │   └── KafkaTopicConfig.java      # Auto-creates the topic
+    │   ├── KafkaTopicConfig.java       # Auto-creates the topic
+    │   └── VirtualThreadConfig.java    # Java 21 virtual thread executor beans
     ├── producer/
     │   └── MessageProducer.java
     ├── consumer/
