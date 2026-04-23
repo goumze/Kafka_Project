@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: kafka-project
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        reconnect.backoff.ms: 1000
+        reconnect.backoff.max.ms: 10000
+        retry.backoff.ms: 1000
+
+    consumer:
+      group-id: kafka-project-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        reconnect.backoff.ms: 1000
+        reconnect.backoff.max.ms: 10000
+        retry.backoff.ms: 1000
+
+    admin:
+      properties:
+        reconnect.backoff.ms: 1000
+        reconnect.backoff.max.ms: 10000
+        retry.backoff.ms: 1000
+
+kafka:
+  topic:
+    name: ${KAFKA_TOPIC_NAME:messages}
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.course.kafka: INFO
+    org.apache.kafka: WARN
+    org.springframework.kafka: INFO

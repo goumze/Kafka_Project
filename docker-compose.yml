@@ -1,0 +1,19 @@
+services:
+  kafka-spring-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kafka-spring-app
+    ports:
+      - "8080:8080"   # Spring Boot REST API
+      - "9092:9092"   # Kafka broker (external access)
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+      - KAFKA_TOPIC_NAME=messages
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092 && wget -q -O /dev/null http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    restart: unless-stopped
