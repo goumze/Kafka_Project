@@ -2,10 +2,9 @@ spring:
   application:
     name: kafka-project
 
-  # ── Java 21 Virtual Threads ──────────────────────────────────────────────
-  # Tomcat will serve every HTTP request on a virtual thread instead of a
-  # platform thread from a fixed pool.  The default async task executor is
-  # also replaced with a virtual-thread-backed one (used by @Async, etc.).
+  # ── Java 21 Virtual Threads ───────────────────────────────────────────────
+  # Replaces Tomcat's platform thread pool with one virtual thread per request.
+  # Requires Spring Boot 3.2+ and Java 21.
   threads:
     virtual:
       enabled: true

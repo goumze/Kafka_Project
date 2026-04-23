@@ -1,63 +1,63 @@
 package com.course.kafka.config;
 
-import org.springframework.beans.BeansException;
-import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.SimpleAsyncTaskExecutor;
-import org.springframework.core.task.VirtualThreadTaskExecutor;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
- * Configures the application to use Java 21 Virtual Threads across all
- * concurrency boundaries:
+ * Wires Java 21 virtual threads throughout the application:
  *
- * <ul>
- *   <li>Tomcat HTTP threads — enabled via {@code spring.threads.virtual.enabled=true}
- *       in application.yaml (no code change required).</li>
- *   <li>Kafka consumer listener threads — the auto-configured
- *       {@code kafkaListenerContainerFactory} is post-processed to attach a
- *       {@link SimpleAsyncTaskExecutor} (with virtual threads enabled) as its
- *       listener task executor.</li>
- *   <li>Kafka producer send-callback threads — the shared {@code virtualThreadExecutor}
- *       bean used in {@link com.course.kafka.producer.MessageProducer}.</li>
- * </ul>
+ * 1. Tomcat HTTP threads         → spring.threads.virtual.enabled=true (application.yaml)
+ * 2. Kafka listener poll threads → SimpleAsyncTaskExecutor(virtualThreads=true)
+ *                                  set on the ConcurrentKafkaListenerContainerFactory
+ * 3. Producer send callbacks     → virtualThreadExecutor bean
+ *                                  used by MessageProducer.whenCompleteAsync(...)
  */
 @Configuration
 public class VirtualThreadConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(VirtualThreadConfig.class);
+
     /**
-     * Shared virtual-thread executor for one-off tasks (e.g. producer callbacks).
-     * Thread names follow the pattern {@code producer-vt-0}, {@code producer-vt-1}, …
+     * A reusable virtual-thread-per-task executor for any async work in the app
+     * (primarily producer send callbacks).
      */
-    @Bean
+    @Bean(name = "virtualThreadExecutor")
     public Executor virtualThreadExecutor() {
-        return new VirtualThreadTaskExecutor("producer-vt-");
+        return Executors.newVirtualThreadPerTaskExecutor();
     }
 
     /**
-     * Post-processes the auto-configured {@code kafkaListenerContainerFactory} to
-     * attach a virtual-thread-backed {@link SimpleAsyncTaskExecutor} as the listener
-     * task executor. {@code SimpleAsyncTaskExecutor} implements the
-     * {@code AsyncListenableTaskExecutor} interface expected by Spring Kafka 3.1,
-     * while {@code setVirtualThreads(true)} ensures each task runs on a JVM virtual
-     * thread on Java 21+.
+     * Customise the Kafka listener container factory so that every
+     * @KafkaListener method is dispatched on a virtual thread.
+     *
+     * SimpleAsyncTaskExecutor with virtualThreads=true creates a new virtual
+     * thread for each task submitted to it, matching exactly how
+     * Executors.newVirtualThreadPerTaskExecutor() behaves but with
+     * the Spring naming/lifecycle support built in.
      */
     @Bean
-    public static BeanPostProcessor kafkaListenerVirtualThreadCustomizer() {
-        return new BeanPostProcessor() {
-            @Override
-            public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
-                if ("kafkaListenerContainerFactory".equals(beanName)
-                        && bean instanceof ConcurrentKafkaListenerContainerFactory<?, ?> factory) {
-                    var executor = new SimpleAsyncTaskExecutor("kafka-listener-vt-");
-                    executor.setVirtualThreads(true);
-                    factory.getContainerProperties().setListenerTaskExecutor(executor);
-                }
-                return bean;
-            }
-        };
+    public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
+            ConsumerFactory<String, String> consumerFactory) {
+
+        ConcurrentKafkaListenerContainerFactory<String, String> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+
+        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("kafka-vt-listener-");
+        executor.setVirtualThreads(true);
+        factory.getContainerProperties().setListenerTaskExecutor(executor);
+
+        log.info("Kafka listener container factory configured with virtual-thread executor");
+        return factory;
     }
 }

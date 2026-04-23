@@ -21,13 +21,19 @@ public class MessageConsumer {
             groupId = "${spring.kafka.consumer.group-id}"
     )
     public void consume(String message) {
-        log.info("Message consumed [{}]: '{}'",
-                Thread.currentThread().isVirtual() ? "virtual" : "platform",
+        log.info("[{}] Message consumed on thread '{}': '{}'",
+                threadType(),
+                Thread.currentThread().getName(),
                 message);
         receivedMessages.add(message);
     }
 
     public List<String> getReceivedMessages() {
         return Collections.unmodifiableList(receivedMessages);
+    }
+
+    /** Returns "virtual" or "platform" based on the current thread type. */
+    private static String threadType() {
+        return Thread.currentThread().isVirtual() ? "virtual" : "platform";
     }
 }

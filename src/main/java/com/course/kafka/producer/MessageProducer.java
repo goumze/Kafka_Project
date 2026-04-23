@@ -30,16 +30,17 @@ public class MessageProducer {
 
     public void sendMessage(String message) {
         CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(topicName, message);
+        // whenCompleteAsync dispatches the callback onto a new virtual thread
         future.whenCompleteAsync((result, ex) -> {
             if (ex == null) {
-                log.info("Message published [{}]: '{}' | topic='{}' partition={} offset={}",
-                        Thread.currentThread().isVirtual() ? "virtual" : "platform",
+                log.info("[{}] Message published: '{}' | topic='{}' partition={} offset={}",
+                        threadType(),
                         message,
                         result.getRecordMetadata().topic(),
                         result.getRecordMetadata().partition(),
                         result.getRecordMetadata().offset());
             } else {
-                log.error("Failed to publish message: '{}'", message, ex);
+                log.error("[{}] Failed to publish message: '{}'", threadType(), message, ex);
             }
         }, virtualThreadExecutor);
     }
@@ -48,17 +49,21 @@ public class MessageProducer {
         CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(topicName, key, message);
         future.whenCompleteAsync((result, ex) -> {
             if (ex == null) {
-                log.info("Message published [{}]: key='{}' value='{}' | topic='{}' partition={} offset={}",
-                        Thread.currentThread().isVirtual() ? "virtual" : "platform",
+                log.info("[{}] Message published: key='{}' value='{}' | topic='{}' partition={} offset={}",
+                        threadType(),
                         key,
                         message,
                         result.getRecordMetadata().topic(),
                         result.getRecordMetadata().partition(),
                         result.getRecordMetadata().offset());
             } else {
-                log.error("Failed to publish message: key='{}' value='{}'", key, message, ex);
+                log.error("[{}] Failed to publish message: key='{}' value='{}'", threadType(), key, message, ex);
             }
         }, virtualThreadExecutor);
     }
-}
 
+    /** Returns "virtual" or "platform" based on the current thread type. */
+    private static String threadType() {
+        return Thread.currentThread().isVirtual() ? "virtual" : "platform";
+    }
+}
