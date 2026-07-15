@@ -81,7 +81,7 @@ services:
     networks:
       - kafka-network
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9093"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -124,7 +124,7 @@ services:
     networks:
       - kafka-network
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9094"]
       interval: 10s
       timeout: 5s
       retries: 5
