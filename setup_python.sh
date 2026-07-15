@@ -20,3 +20,15 @@ pip install -r requirements.txt
 
 echo "Python environment setup complete!"
 python --version
+
+echo ""
+echo "Starting Docker containers for Kafka cluster..."
+docker-compose up -d
+
+echo "Waiting for Kafka brokers to be ready..."
+sleep 15
+
+echo "Kafka cluster is starting up. Brokers should be available shortly."
+echo "Kafka UI will be available at: http://localhost:8080"
+echo ""
+echo "Setup complete!"
