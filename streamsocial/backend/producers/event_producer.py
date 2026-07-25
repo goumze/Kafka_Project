@@ -12,6 +12,10 @@ from models.events import StreamSocialEvent, EventType
 
 logger = logging.getLogger(__name__)
 
+# Configuration constants
+DEFAULT_BOOTSTRAP_SERVERS = ['localhost:9091', 'localhost:9092', 'localhost:9093']
+RETENTION_MS = 7 * 24 * 60 * 60 * 1000  # 7 days in milliseconds
+
 
 class ClusterAwareProducerConfig:
     """Configuration for cluster-aware producer settings."""
@@ -33,7 +37,7 @@ class ClusterAwareProducerConfig:
         max_in_flight_requests: int = 5,
     ):
         # Maintain backward compatibility with original port configuration
-        self.bootstrap_servers = bootstrap_servers or ['localhost:9092', 'localhost:9093', 'localhost:9094']
+        self.bootstrap_servers = bootstrap_servers or DEFAULT_BOOTSTRAP_SERVERS
         self.topic = topic
         self.partitions = partitions
         self.replication_factor = replication_factor
@@ -140,14 +144,14 @@ class StreamSocialEventProducer:
                 topic_configs={
                     'min.insync.replicas': str(self.config.min_insync_replicas),
                     'compression.type': self.config.compression_type,
-                    'retention.ms': str(604800000),  # 7 days retention
+                    'retention.ms': str(RETENTION_MS),
                 }
             )
             
-            fs = self.admin_client.create_topics([topic], validate_only=False)
-            for topic_name, f in fs.items():
+            topic_futures = self.admin_client.create_topics([topic], validate_only=False)
+            for topic_name, topic_future in topic_futures.items():
                 try:
-                    f.result()
+                    topic_future.result()
                     logger.info(f"Topic '{topic_name}' created successfully")
                 except Exception as e:
                     logger.warning(f"Topic creation failed or already exists: {e}")
@@ -291,7 +295,8 @@ class StreamSocialEventProducer:
                 try:
                     event_type = EventType[event_type_str]
                 except KeyError:
-                    logger.error(f"Event {i}: Invalid event_type '{event_type_str}'. Valid types: {[e.value for e in EventType]}")
+                    valid_types = [e.name for e in EventType]
+                    logger.error(f"Event {i}: Invalid event_type '{event_type_str}'. Valid types: {valid_types}")
                     continue
                 
                 event_id = self.publish_event(
