@@ -293,18 +293,18 @@ class StreamSocialEventProducer:
             List of event IDs
         """
         event_ids = []
-        for i, event_data in enumerate(events):
+        for event_index, event_data in enumerate(events):
             try:
                 # Validate event_type exists
                 event_type_str = event_data.get('event_type')
                 if not event_type_str:
-                    logger.error(f"Event {i}: Missing event_type field")
+                    logger.error(f"Event {event_index}: Missing event_type field")
                     continue
                 
                 try:
                     event_type = EventType[event_type_str]
                 except KeyError:
-                    logger.error(f"Event {i}: Invalid event_type '{event_type_str}'. Valid types: {self._VALID_EVENT_TYPES}")
+                    logger.error(f"Event {event_index}: Invalid event_type '{event_type_str}'. Valid types: {self._VALID_EVENT_TYPES}")
                     continue
                 
                 event_id = self.publish_event(
@@ -315,9 +315,10 @@ class StreamSocialEventProducer:
                 )
                 event_ids.append(event_id)
             except KeyError as e:
-                logger.error(f"Event {i}: Missing required field: {e}")
+                missing_field = str(e.args[0]) if e.args else str(e)
+                logger.error(f"Event {event_index}: Missing required field: {missing_field}")
             except Exception as e:
-                logger.error(f"Event {i}: Failed to publish event: {e}")
+                logger.error(f"Event {event_index}: Failed to publish event: {e}")
         
         # Ensure all messages are flushed
         self.flush()
@@ -330,7 +331,7 @@ class StreamSocialEventProducer:
         Args:
             timeout: Timeout in seconds (defaults to config request_timeout_ms)
         """
-        timeout = timeout or (self.config.request_timeout_ms / 1000)
+        timeout = timeout if timeout is not None else (self.config.request_timeout_ms / 1000)
         self.producer.flush(timeout=timeout)
         logger.debug("Producer messages flushed to cluster")
     
