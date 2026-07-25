@@ -15,7 +15,7 @@ The enhanced `StreamSocialEventProducer` is a production-grade, cluster-aware Ka
 ```python
 producer = StreamSocialEventProducer()
 health = producer.check_cluster_health()
-print(f"Cluster has {health['brokers_available']} brokers")
+print(f"Cluster has {health['topics_available']} topics, {health['partitions']} partitions")
 ```
 
 ### 2. **Intelligent Partitioning Strategy**
@@ -166,7 +166,7 @@ producer.publish_event(
 ```python
 health = producer.check_cluster_health()
 if health['status'] == 'healthy':
-    print(f"Cluster healthy: {health['brokers_available']} brokers")
+    print(f"Cluster healthy: {health['topics_available']} topics, {health['partitions']} partitions")
 else:
     print(f"Cluster issues: {health['error']}")
 ```

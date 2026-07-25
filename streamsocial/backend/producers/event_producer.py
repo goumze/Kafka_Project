@@ -160,7 +160,6 @@ class StreamSocialEventProducer:
             # Refresh metadata by accessing topics
             _ = self.producer.topics()
             logger.info("Cluster metadata updated successfully")
-            self._cluster_brokers = []
         except Exception as e:
             logger.warning(f"Could not fetch cluster metadata: {e}")
     
@@ -181,8 +180,8 @@ class StreamSocialEventProducer:
         try:
             partitions = self.producer.partitions_for_topic(self.topic)
             if partitions:
-                # Use deterministic hash for consistent partitioning across processes
-                hash_value = int(hashlib.md5(user_id.encode()).hexdigest(), 16)
+                # Use deterministic SHA256 hash for consistent partitioning across processes
+                hash_value = int(hashlib.sha256(user_id.encode()).hexdigest(), 16)
                 partition = hash_value % len(partitions)
                 return partition
         except Exception as e:
