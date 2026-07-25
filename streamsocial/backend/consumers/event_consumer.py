@@ -3,22 +3,22 @@ from kafka import KafkaConsumer
 from typing import Dict, Any, List, Callable
 from datetime import datetime
 
+
 class StreamSocialEventConsumer:
-    def __init__(self, bootstrap_servers: List[str] = ['localhost:9091','localhost:9092','localhost:9093'], group_id: str = 'streamsocial_event_consumers'):
+    def __init__(self, bootstrap_servers: List[str] = ['localhost:9092','localhost:9093','localhost:9094'], group_id: str = 'streamsocial_event_consumers'):
         self.consumer = KafkaConsumer(
             'streamsocial_events',
             bootstrap_servers=bootstrap_servers,
             group_id=group_id,
-            value_deserializer=lambda v: json.loads(v.decode('utf-8')),
-            key_deserializer=lambda k: k.decode('utf-8') if k else None,
-            auto_offset_reset='earliest'
+            auto_offset_reset='latest',
+            enable_auto_commit=True
         )
         self.event_handlers: Dict[str, Callable[[Dict[str, Any]], None]] = {}
         self.processed_events = []
 
     def start_consuming(self):
         for message in self.consumer:
-            event_data = message.value
+            event_data = json.loads(message.value.decode('utf-8')) if message.value else {}
             event_type = event_data.get('event_type')
             
             # Store for dashboard

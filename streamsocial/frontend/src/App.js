@@ -38,6 +38,14 @@ function App() {
     }
   };
 
+  const simulateBrokerFailure = async () => {
+    const response = await fetch('/cluster/simulate_failure', {
+      method: 'POST',
+      body: JSON.stringify({ broker_id: 2 }), // Simulate failure for broker 2
+      //headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
   return (
     <div className="App">
       <header>
