@@ -74,7 +74,8 @@ class StreamSocialEventProducer:
     """
     
     # Cache valid event types at class level to avoid repeated computation
-    _VALID_EVENT_TYPES = [e.name for e in EventType]
+    # Use tuple for immutability and memory efficiency
+    _VALID_EVENT_TYPES = tuple(e.name for e in EventType)
     
     def __init__(self, config: Optional[ClusterAwareProducerConfig] = None):
         """
@@ -315,7 +316,8 @@ class StreamSocialEventProducer:
                 )
                 event_ids.append(event_id)
             except KeyError as e:
-                missing_field = str(e.args[0]) if e.args else str(e)
+                # Extract field name from KeyError, removing quotes if present
+                missing_field = e.args[0] if e.args else 'unknown'
                 logger.error(f"Event {event_index}: Missing required field: {missing_field}")
             except Exception as e:
                 logger.error(f"Event {event_index}: Failed to publish event: {e}")
@@ -331,7 +333,8 @@ class StreamSocialEventProducer:
         Args:
             timeout: Timeout in seconds (defaults to config request_timeout_ms)
         """
-        timeout = timeout if timeout is not None else (self.config.request_timeout_ms / 1000)
+        if timeout is None:
+            timeout = self.config.request_timeout_ms / 1000
         self.producer.flush(timeout=timeout)
         logger.debug("Producer messages flushed to cluster")
     
