@@ -294,18 +294,19 @@ class StreamSocialEventProducer:
             List of event IDs
         """
         event_ids = []
-        for event_index, event_data in enumerate(events):
+        for idx, event_data in enumerate(events):
             try:
                 # Validate event_type exists
                 event_type_str = event_data.get('event_type')
                 if not event_type_str:
-                    logger.error(f"Event {event_index}: Missing event_type field")
+                    logger.error(f"Event {idx}: Missing event_type field")
                     continue
                 
                 try:
                     event_type = EventType[event_type_str]
                 except KeyError:
-                    logger.error(f"Event {event_index}: Invalid event_type '{event_type_str}'. Valid types: {self._VALID_EVENT_TYPES}")
+                    valid_types_str = ', '.join(self._VALID_EVENT_TYPES)
+                    logger.error(f"Event {idx}: Invalid event_type '{event_type_str}'. Valid types: {valid_types_str}")
                     continue
                 
                 event_id = self.publish_event(
@@ -316,11 +317,11 @@ class StreamSocialEventProducer:
                 )
                 event_ids.append(event_id)
             except KeyError as e:
-                # Extract field name from KeyError, removing quotes if present
+                # Extract field name from KeyError
                 missing_field = e.args[0] if e.args else 'unknown'
-                logger.error(f"Event {event_index}: Missing required field: {missing_field}")
+                logger.error(f"Event {idx}: Missing required field: {missing_field}")
             except Exception as e:
-                logger.error(f"Event {event_index}: Failed to publish event: {e}")
+                logger.error(f"Event {idx}: Failed to publish event: {e}")
         
         # Ensure all messages are flushed
         self.flush()
