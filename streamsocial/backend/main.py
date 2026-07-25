@@ -9,10 +9,14 @@ import asyncio
 import threading
 from typing import Optional, Dict, Any, List
 
-# Import consumer
+# Import consumer and producer
 from consumers.consumer_runner import StreamSocialEventConsumer
+from producers.event_producer import StreamSocialEventProducer
 
 app = FastAPI(title="StreamSocial Backend API", version="1.0.0")
+
+# Initialize producer
+producer = StreamSocialEventProducer()
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,6 +79,7 @@ def run_consumer_in_background():
             consumer = StreamSocialEventConsumer()
         consumer_running = True
         consumer.start_consuming()
+        print("Kafka consumer started in background thread.")
     except Exception as e:
         print(f"Error in consumer thread: {str(e)}")
         consumer_running = False
@@ -98,19 +103,30 @@ async def shutdown_event():
 
 @app.post("/events/user/register")
 async def register_user(registration: UserRegistration):
-    """Register a user and store the event"""
+    """Register a user and publish the event to Kafka"""
     user_id = str(uuid.uuid4())
-    event_id = str(uuid.uuid4())
     
-    event = {
-        "event_id": event_id,
-        "user_id": user_id,
-        "event_type": "user_registration",
-        "event_data": {"username": registration.username, "email": registration.email},
-        "timestamp": datetime.now().isoformat()
-    }
+    # Import EventType from models
+    from models.events import EventType
     
-    return {"success": True, "user_id": user_id, "event_id": event_id}
+    # Publish event to Kafka
+    try:
+        producer.publish_event(
+            event_type=EventType.USER_REGISTRATION,
+            user_id=user_id,
+            data={"username": registration.username, "email": registration.email}
+        )
+        return {
+            "success": True,
+            "user_id": user_id,
+            "message": "User registration event published to Kafka"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "user_id": user_id,
+            "error": str(e)
+        }
 
 @app.get("/events/recent")
 async def get_recent_events():
