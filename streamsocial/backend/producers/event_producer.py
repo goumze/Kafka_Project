@@ -76,6 +76,7 @@ class StreamSocialEventProducer:
     # Cache valid event types at class level to avoid repeated computation
     # Use tuple for immutability and memory efficiency
     _VALID_EVENT_TYPES = tuple(e.name for e in EventType)
+    _VALID_EVENT_TYPES_STR = ', '.join(_VALID_EVENT_TYPES)
     
     def __init__(self, config: Optional[ClusterAwareProducerConfig] = None):
         """
@@ -305,8 +306,7 @@ class StreamSocialEventProducer:
                 try:
                     event_type = EventType[event_type_str]
                 except KeyError:
-                    valid_types_str = ', '.join(self._VALID_EVENT_TYPES)
-                    logger.error(f"Event {idx}: Invalid event_type '{event_type_str}'. Valid types: {valid_types_str}")
+                    logger.error(f"Event {idx}: Invalid event_type '{event_type_str}'. Valid types: {self._VALID_EVENT_TYPES_STR}")
                     continue
                 
                 event_id = self.publish_event(
