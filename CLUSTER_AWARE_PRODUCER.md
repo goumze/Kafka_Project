@@ -98,7 +98,7 @@ event_ids = producer.publish_batch(events)
 ### Default Configuration
 ```python
 config = ClusterAwareProducerConfig(
-    bootstrap_servers=['localhost:9092', 'localhost:9093', 'localhost:9094'],
+    bootstrap_servers=['localhost:9091', 'localhost:9092', 'localhost:9093'],
     topic='streamsocial_events',
     partitions=3,
     replication_factor=3,

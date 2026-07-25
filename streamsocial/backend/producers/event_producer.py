@@ -3,6 +3,7 @@ import uuid
 import logging
 import time
 import hashlib
+from collections import deque
 from kafka import KafkaProducer, KafkaAdminClient
 from kafka.admin import NewTopic
 from kafka.errors import KafkaError
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 # Configuration constants
 DEFAULT_BOOTSTRAP_SERVERS = ['localhost:9091', 'localhost:9092', 'localhost:9093']
 RETENTION_MS = 7 * 24 * 60 * 60 * 1000  # 7 days in milliseconds
+VALID_ACKS = {'all', '0', '1', -1, 0, 1}  # Valid values for acks parameter
+MAX_LATENCY_SAMPLES = 1000  # Maximum latency measurements to keep in memory
 
 
 class ClusterAwareProducerConfig:
@@ -45,6 +48,9 @@ class ClusterAwareProducerConfig:
         self.batch_size = batch_size
         self.linger_ms = linger_ms
         self.compression_type = compression_type
+        # Validate acks parameter
+        if acks not in VALID_ACKS:
+            raise ValueError(f"Invalid acks value '{acks}'. Valid options: {VALID_ACKS}")
         self.acks = acks
         self.retries = retries
         self.retry_backoff_ms = retry_backoff_ms
@@ -67,6 +73,9 @@ class StreamSocialEventProducer:
     - Metrics collection for monitoring
     """
     
+    # Cache valid event types at class level to avoid repeated computation
+    _VALID_EVENT_TYPES = [e.name for e in EventType]
+    
     def __init__(self, config: Optional[ClusterAwareProducerConfig] = None):
         """
         Initialize the cluster-aware producer.
@@ -79,7 +88,7 @@ class StreamSocialEventProducer:
         self._metrics = {
             'messages_sent': 0,
             'messages_failed': 0,
-            'send_latency_ms': [],
+            'send_latency_ms': deque(maxlen=MAX_LATENCY_SAMPLES),
         }
         
         # Initialize producer with cluster-aware settings
@@ -295,8 +304,7 @@ class StreamSocialEventProducer:
                 try:
                     event_type = EventType[event_type_str]
                 except KeyError:
-                    valid_types = [e.name for e in EventType]
-                    logger.error(f"Event {i}: Invalid event_type '{event_type_str}'. Valid types: {valid_types}")
+                    logger.error(f"Event {i}: Invalid event_type '{event_type_str}'. Valid types: {self._VALID_EVENT_TYPES}")
                     continue
                 
                 event_id = self.publish_event(
