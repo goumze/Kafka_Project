@@ -2,6 +2,7 @@ import json
 import uuid
 import logging
 import time
+import hashlib
 from kafka import KafkaProducer, KafkaAdminClient
 from kafka.admin import NewTopic
 from kafka.errors import KafkaError
@@ -31,6 +32,7 @@ class ClusterAwareProducerConfig:
         request_timeout_ms: int = 30000,
         max_in_flight_requests: int = 5,
     ):
+        # Maintain backward compatibility with original port configuration
         self.bootstrap_servers = bootstrap_servers or ['localhost:9092', 'localhost:9093', 'localhost:9094']
         self.topic = topic
         self.partitions = partitions
@@ -155,11 +157,10 @@ class StreamSocialEventProducer:
     def _update_cluster_metadata(self) -> None:
         """Fetch and cache cluster metadata."""
         try:
-            metadata = self.producer._metadata
-            if metadata:
-                brokers = list(metadata.brokers())
-                logger.info(f"Cluster has {len(brokers)} brokers: {brokers}")
-                self._cluster_brokers = brokers
+            # Refresh metadata by accessing topics
+            _ = self.producer.topics()
+            logger.info("Cluster metadata updated successfully")
+            self._cluster_brokers = []
         except Exception as e:
             logger.warning(f"Could not fetch cluster metadata: {e}")
     
@@ -168,7 +169,8 @@ class StreamSocialEventProducer:
         Determine partition for user_id to maintain ordering.
         
         Messages from the same user go to the same partition, ensuring
-        ordering guarantees for user-specific events.
+        ordering guarantees for user-specific events. Uses deterministic
+        hashing to ensure consistent partitioning across processes.
         
         Args:
             user_id: The user identifier
@@ -179,8 +181,9 @@ class StreamSocialEventProducer:
         try:
             partitions = self.producer.partitions_for_topic(self.topic)
             if partitions:
-                # Use user_id hash for consistent partitioning
-                partition = hash(user_id) % len(partitions)
+                # Use deterministic hash for consistent partitioning across processes
+                hash_value = int(hashlib.md5(user_id.encode()).hexdigest(), 16)
+                partition = hash_value % len(partitions)
                 return partition
         except Exception as e:
             logger.warning(f"Could not determine partition: {e}")
@@ -278,17 +281,31 @@ class StreamSocialEventProducer:
             List of event IDs
         """
         event_ids = []
-        for event_data in events:
+        for i, event_data in enumerate(events):
             try:
+                # Validate event_type exists
+                event_type_str = event_data.get('event_type')
+                if not event_type_str:
+                    logger.error(f"Event {i}: Missing event_type field")
+                    continue
+                
+                try:
+                    event_type = EventType[event_type_str]
+                except KeyError:
+                    logger.error(f"Event {i}: Invalid event_type '{event_type_str}'. Valid types: {[e.value for e in EventType]}")
+                    continue
+                
                 event_id = self.publish_event(
-                    event_type=EventType[event_data['event_type']],
+                    event_type=event_type,
                     user_id=event_data['user_id'],
                     data=event_data['data'],
                     session_id=event_data.get('session_id'),
                 )
                 event_ids.append(event_id)
+            except KeyError as e:
+                logger.error(f"Event {i}: Missing required field: {e}")
             except Exception as e:
-                logger.error(f"Failed to publish event in batch: {e}")
+                logger.error(f"Event {i}: Failed to publish event: {e}")
         
         # Ensure all messages are flushed
         self.flush()
@@ -338,18 +355,17 @@ class StreamSocialEventProducer:
         """
         try:
             self._update_cluster_metadata()
-            metadata = self.producer._metadata
-            brokers = list(metadata.brokers()) if metadata else []
             
-            # Get topic partitions and replicas
+            # Get available topics and partitions
+            topics = self.producer.topics()
             partitions = self.producer.partitions_for_topic(self.topic)
             
             return {
                 'status': 'healthy',
-                'brokers_available': len(brokers),
-                'brokers': brokers,
+                'topics_available': len(topics),
                 'topic': self.topic,
                 'partitions': len(partitions) if partitions else 0,
+                'bootstrap_servers': self.config.bootstrap_servers,
                 'timestamp': datetime.now().isoformat(),
             }
         except Exception as e:
