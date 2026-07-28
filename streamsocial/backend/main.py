@@ -8,6 +8,7 @@ from pydantic import BaseModel
 import asyncio
 import threading
 from typing import Optional, Dict, Any, List
+from models.events import EventType
 
 # Import consumer and producer
 from consumers.consumer_runner import StreamSocialEventConsumer
@@ -105,9 +106,6 @@ async def shutdown_event():
 async def register_user(registration: UserRegistration):
     """Register a user and publish the event to Kafka"""
     user_id = str(uuid.uuid4())
-    
-    # Import EventType from models
-    from models.events import EventType
     
     # Publish event to Kafka
     try:
