@@ -59,6 +59,9 @@ class StreamSocialEventProducer:
         
         # Track created topics
         self.created_topics = set()
+        
+        # Ensure all configured topics exist on startup
+        self.ensure_topics_exist()
 
     def ensure_topics_exist(self) -> None:
         """
