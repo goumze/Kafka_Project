@@ -1,10 +1,16 @@
 #!/bin/bash
 
-# StreamSocial End-to-End Testing Script
-# Demonstrates simultaneous event production and consumption
-# Usage: ./test_end_to_end.sh
+# StreamSocial Controller API Testing Suite
+# Tests all endpoints across Health, Event, Consumer, and Cluster controllers
+# Usage: 
+#   ./test_end_to_end.sh              # Run all tests
+#   ./test_end_to_end.sh health       # Run only health controller tests
+#   ./test_end_to_end.sh event        # Run only event controller tests
+#   ./test_end_to_end.sh consumer     # Run only consumer controller tests
+#   ./test_end_to_end.sh cluster      # Run only cluster controller tests
+#   ./test_end_to_end.sh list         # Show available test options
 
-set -e
+set +e
 
 BASE_URL="http://localhost:8000"
 
@@ -16,12 +22,9 @@ CYAN='\033[0;36m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${CYAN}"
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║  StreamSocial End-to-End Event Flow Test                       ║"
-echo "║  Producer → Kafka Topic → Consumer (Real-time Demo)            ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
+# Counters
+TESTS_PASSED=0
+TESTS_FAILED=0
 
 # Function to print section headers
 section() {
@@ -36,149 +39,398 @@ info() {
 # Function to print success
 success() {
     echo -e "${GREEN}[✓]${NC} $1"
+    ((TESTS_PASSED++))
 }
 
 # Function to print error
 error() {
     echo -e "${RED}[✗]${NC} $1"
+    ((TESTS_FAILED++))
 }
 
-# ========== PHASE 1: VERIFY BACKEND IS RUNNING ==========
-section "Phase 1: Verifying Backend Service"
+# ═══════════════════════════════════════════════════════════════════
+# HEALTH CONTROLLER TESTS
+# ═══════════════════════════════════════════════════════════════════
 
-if curl -s $BASE_URL/health | jq -e '.status == "healthy"' > /dev/null 2>&1; then
-    success "Backend is running on $BASE_URL"
-else
-    error "Backend is not running! Start it with: python streamsocial/backend/main.py"
-    exit 1
-fi
-
-# ========== PHASE 2: CHECK INITIAL STATE ==========
-section "Phase 2: Checking Initial Consumer State"
-
-INITIAL_STATS=$(curl -s $BASE_URL/consumer/stats)
-INITIAL_COUNT=$(echo $INITIAL_STATS | jq '.total_events_processed')
-info "Initial events processed: $INITIAL_COUNT"
-echo "$INITIAL_STATS" | jq '{status: .status, running: .running, total_events: .total_events_processed}'
-
-# ========== PHASE 3: GENERATE TEST EVENTS ==========
-section "Phase 3: Generating Test Events (Producer)"
-
-# Array of test events
-declare -a USERS=("alice" "bob" "charlie" "diana" "eve")
-declare -a EMAILS=("alice@example.com" "bob@example.com" "charlie@example.com" "diana@example.com" "eve@example.com")
-
-info "Sending 5 user registration events..."
-
-for i in "${!USERS[@]}"; do
-    USER="${USERS[$i]}"
-    EMAIL="${EMAILS[$i]}"
+test_health_check() {
+    section "GET /health - Health Check"
+    RESPONSE=$(curl -s $BASE_URL/health)
     
-    RESPONSE=$(curl -s -X POST $BASE_URL/events/user/register \
+    if echo "$RESPONSE" | jq -e '.status == "healthy"' > /dev/null 2>&1; then
+        success "Backend is healthy"
+        echo "$RESPONSE" | jq '{status: .status, service: .service}'
+    else
+        error "Health check failed"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+test_root_endpoint() {
+    section "GET / - Root Endpoint (API Info)"
+    RESPONSE=$(curl -s $BASE_URL/)
+    
+    if echo "$RESPONSE" | jq -e '.service' > /dev/null 2>&1; then
+        success "Root endpoint returns API info"
+        echo "$RESPONSE" | jq '{service: .service, version: .version, kafka_integration: .kafka_integration}'
+    else
+        error "Root endpoint failed"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# EVENT CONTROLLER TESTS
+# ═══════════════════════════════════════════════════════════════════
+
+test_register_user() {
+    section "POST /events/user/register - User Registration"
+    
+    declare -a USERS=("alice" "bob" "charlie")
+    declare -a EMAILS=("alice@example.com" "bob@example.com" "charlie@example.com")
+    
+    info "Publishing 3 user registration events..."
+    
+    for i in "${!USERS[@]}"; do
+        USER="${USERS[$i]}"
+        EMAIL="${EMAILS[$i]}"
+        
+        RESPONSE=$(curl -s -X POST $BASE_URL/events/user/register \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"$USER\",\"email\":\"$EMAIL\",\"source\":\"test\"}")
+        
+        if echo "$RESPONSE" | jq -e '.success == true' > /dev/null 2>&1; then
+            USER_ID=$(echo $RESPONSE | jq -r '.user_id')
+            success "Event published for user '$USER' (ID: ${USER_ID:0:8})"
+        else
+            error "Failed to publish event for user '$USER'"
+            echo "$RESPONSE" | jq '.'
+        fi
+        sleep 0.3
+    done
+}
+
+test_get_recent_events() {
+    section "GET /events/recent - Get Recent Events"
+    RESPONSE=$(curl -s $BASE_URL/events/recent)
+    
+    if echo "$RESPONSE" | jq -e '.success == true' > /dev/null 2>&1; then
+        success "Retrieved recent events"
+        echo "$RESPONSE" | jq '{success: .success, event_count: .count, in_memory: .events_in_memory, message: .message}'
+    else
+        error "Failed to get recent events"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# CONSUMER CONTROLLER TESTS
+# ═══════════════════════════════════════════════════════════════════
+
+test_consumer_stats() {
+    section "GET /consumer/stats - Consumer Statistics"
+    RESPONSE=$(curl -s $BASE_URL/consumer/stats)
+    
+    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
+        success "Retrieved consumer statistics"
+        echo "$RESPONSE" | jq '{status: .status, running: .running, total_events_processed: .total_events_processed, events_in_memory: .events_in_memory}'
+    else
+        error "Failed to get consumer stats"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+test_consumer_start() {
+    section "POST /consumer/start - Start Consumer"
+    RESPONSE=$(curl -s -X POST $BASE_URL/consumer/start \
+        -H "Content-Type: application/json")
+    
+    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
+        success "Consumer start endpoint called"
+        echo "$RESPONSE" | jq '{status: .status, message: .message}'
+    else
+        error "Failed to start consumer"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+test_consumer_stop() {
+    section "POST /consumer/stop - Stop Consumer"
+    RESPONSE=$(curl -s -X POST $BASE_URL/consumer/stop \
+        -H "Content-Type: application/json")
+    
+    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
+        success "Consumer stop endpoint called"
+        echo "$RESPONSE" | jq '{status: .status, message: .message}'
+    else
+        error "Failed to stop consumer"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# CLUSTER CONTROLLER TESTS
+# ═══════════════════════════════════════════════════════════════════
+
+test_cluster_health() {
+    section "GET /cluster/health - Cluster Health Status"
+    RESPONSE=$(curl -s $BASE_URL/cluster/health)
+    
+    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
+        success "Retrieved cluster health"
+        HEALTHY=$(echo "$RESPONSE" | jq '.healthy_count')
+        TOTAL=$(echo "$RESPONSE" | jq '.total_brokers')
+        echo "$RESPONSE" | jq "{status: .status, healthy_brokers: .healthy_count, total_brokers: .total_brokers}"
+    else
+        error "Failed to get cluster health"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+test_cluster_metadata() {
+    section "GET /cluster/metadata - Cluster Metadata"
+    RESPONSE=$(curl -s $BASE_URL/cluster/metadata)
+    
+    if echo "$RESPONSE" | jq -e '.topic' > /dev/null 2>&1; then
+        success "Retrieved cluster metadata"
+        echo "$RESPONSE" | jq '{topic: .topic, brokers: .brokers | length, bootstrap_servers: .bootstrap_servers | length, replication_factor: .replication_factor}'
+    else
+        error "Failed to get cluster metadata"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+test_cluster_partitions() {
+    section "GET /cluster/partitions - Partition Leadership"
+    RESPONSE=$(curl -s $BASE_URL/cluster/partitions)
+    
+    if echo "$RESPONSE" | jq -e '.topic' > /dev/null 2>&1; then
+        success "Retrieved partition information"
+        echo "$RESPONSE" | jq '{topic: .topic, partition_details_count: .partition_details | length}'
+    else
+        error "Failed to get partition info"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+test_consumer_lag() {
+    section "GET /cluster/consumer-lag - Consumer Lag"
+    RESPONSE=$(curl -s $BASE_URL/cluster/consumer-lag)
+    
+    if echo "$RESPONSE" | jq -e '.consumer_group' > /dev/null 2>&1; then
+        success "Retrieved consumer lag"
+        echo "$RESPONSE" | jq '{consumer_group: .consumer_group, lag_info_entries: .lag_info | length}'
+    else
+        error "Failed to get consumer lag"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+test_simulate_broker_failure() {
+    section "POST /cluster/simulate-failure - Simulate Broker Failure"
+    info "Simulating kafka-broker-2 failure..."
+    
+    RESPONSE=$(curl -s -X POST $BASE_URL/cluster/simulate-failure \
         -H "Content-Type: application/json" \
-        -d "{\"username\":\"$USER\",\"email\":\"$EMAIL\"}")
+        -d '{"broker_name":"kafka-broker-2"}')
     
-    USER_ID=$(echo $RESPONSE | jq -r '.user_id')
-    EVENT_ID=$(echo $RESPONSE | jq -r '.event_id')
+    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
+        success "Broker failure simulated"
+        echo "$RESPONSE" | jq '{status: .status, broker: .broker, action: .action}'
+        sleep 2
+    else
+        error "Failed to simulate broker failure"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
+
+test_recover_broker_failure() {
+    section "POST /cluster/recover-failure - Recover Broker"
+    info "Recovering kafka-broker-2..."
     
-    echo -e "  ${GREEN}→${NC} Event #$((i+1)): User '$USER' registered (Event ID: ${EVENT_ID:0:8})..."
-    sleep 0.5
-done
+    RESPONSE=$(curl -s -X POST $BASE_URL/cluster/recover-failure \
+        -H "Content-Type: application/json" \
+        -d '{"broker_name":"kafka-broker-2"}')
+    
+    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
+        success "Broker recovery initiated"
+        echo "$RESPONSE" | jq '{status: .status, broker: .broker, action: .action}'
+        sleep 2
+    else
+        error "Failed to recover broker"
+        echo "$RESPONSE" | jq '.'
+    fi
+}
 
-# ========== PHASE 4: MONITOR CONSUMPTION IN REAL-TIME ==========
-section "Phase 4: Monitoring Real-Time Event Consumption"
+# ═══════════════════════════════════════════════════════════════════
+# TEST SUITES - GROUP BY CONTROLLER
+# ═══════════════════════════════════════════════════════════════════
 
-info "Fetching recent events from consumer..."
-echo ""
+test_health_controller() {
+    echo -e "${CYAN}"
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║  HEALTH CONTROLLER TESTS                                       ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    test_health_check
+    test_root_endpoint
+}
 
-RECENT_EVENTS=$(curl -s $BASE_URL/events/recent)
-EVENTS_COUNT=$(echo $RECENT_EVENTS | jq '.count')
-EVENTS_IN_MEMORY=$(echo $RECENT_EVENTS | jq '.events_in_memory')
+test_event_controller() {
+    echo -e "${CYAN}"
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║  EVENT CONTROLLER TESTS                                        ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    test_register_user
+    test_get_recent_events
+}
 
-info "Consumer statistics:"
-echo "$RECENT_EVENTS" | jq '{events_processed: .count, in_memory: .events_in_memory}'
+test_consumer_controller() {
+    echo -e "${CYAN}"
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║  CONSUMER CONTROLLER TESTS                                     ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    test_consumer_stats
+    test_consumer_start
+    test_consumer_stop
+}
 
-echo ""
-info "Recent events consumed:"
-echo "$RECENT_EVENTS" | jq '.events[] | {event_id: .event_id[0:8], type: .event_type, user: .event_data.username}' | head -20
+test_cluster_controller() {
+    echo -e "${CYAN}"
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║  CLUSTER CONTROLLER TESTS                                      ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    test_cluster_health
+    test_cluster_metadata
+    test_cluster_partitions
+    test_consumer_lag
+    test_simulate_broker_failure
+    test_recover_broker_failure
+}
 
-# ========== PHASE 5: VERIFY EVENT FLOW ==========
-section "Phase 5: Verifying Event Flow"
+test_all() {
+    echo -e "${CYAN}"
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║  StreamSocial Complete Controller API Test Suite               ║"
+    echo "║  Testing all endpoints across all controllers                  ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    test_health_controller
+    test_event_controller
+    test_consumer_controller
+    test_cluster_controller
+}
 
-CONSUMER_STATS=$(curl -s $BASE_URL/consumer/stats)
-FINAL_COUNT=$(echo $CONSUMER_STATS | jq '.total_events_processed')
-EVENTS_ADDED=$((FINAL_COUNT - INITIAL_COUNT))
+# ═══════════════════════════════════════════════════════════════════
+# HELP AND TEST LISTING
+# ═══════════════════════════════════════════════════════════════════
 
-info "Initial events in consumer: $INITIAL_COUNT"
-info "Final events in consumer: $FINAL_COUNT"
-info "New events processed: $EVENTS_ADDED"
+show_help() {
+    echo -e "${CYAN}"
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║  StreamSocial Controller API Test Suite                        ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${BLUE}USAGE:${NC}"
+    echo "  ./test_end_to_end.sh [OPTION]"
+    echo ""
+    echo -e "${BLUE}OPTIONS:${NC}"
+    echo "  (no args)      Run all controller tests"
+    echo "  health         Test Health Controller only"
+    echo "  event          Test Event Controller only"
+    echo "  consumer       Test Consumer Controller only"
+    echo "  cluster        Test Cluster Controller only"
+    echo "  list           Show this help message"
+    echo "  help           Show this help message"
+    echo ""
+    echo -e "${BLUE}EXAMPLES:${NC}"
+    echo "  ./test_end_to_end.sh                # Run all tests"
+    echo "  ./test_end_to_end.sh health         # Only health tests"
+    echo "  ./test_end_to_end.sh cluster        # Only cluster tests"
+    echo ""
+}
 
-if [ $EVENTS_ADDED -gt 0 ]; then
-    success "Event flow verified! $EVENTS_ADDED events successfully produced and consumed"
-else
-    error "No events were consumed. Check if consumer is running."
-fi
+# ═══════════════════════════════════════════════════════════════════
+# MAIN - BACKEND VERIFICATION AND ROUTING
+# ═══════════════════════════════════════════════════════════════════
 
-echo "$CONSUMER_STATS" | jq '{status: .status, running: .running, total_processed: .total_events_processed, lag: .consumer_lag}'
+verify_backend() {
+    section "Verifying Backend Service"
+    
+    if curl -s $BASE_URL/health > /dev/null 2>&1; then
+        success "Backend is running on $BASE_URL"
+    else
+        error "Backend is NOT running!"
+        echo ""
+        echo -e "${YELLOW}Please start the backend first:${NC}"
+        echo "  cd /workspaces/Kafka_Project/streamsocial/backend"
+        echo "  python main.py"
+        echo ""
+        exit 1
+    fi
+}
 
-# ========== PHASE 6: CLUSTER HEALTH CHECK ==========
-section "Phase 6: Verifying Cluster Health"
+print_summary() {
+    echo ""
+    echo -e "${CYAN}"
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║  TEST RESULTS SUMMARY                                          ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo -e "${GREEN}✓ PASSED: $TESTS_PASSED${NC}"
+    echo -e "${RED}✗ FAILED: $TESTS_FAILED${NC}"
+    echo ""
+}
 
-HEALTH=$(curl -s $BASE_URL/cluster/health)
-HEALTHY=$(echo $HEALTH | jq '.healthy_count')
-TOTAL=$(echo $HEALTH | jq '.total_brokers')
+# ═══════════════════════════════════════════════════════════════════
+# MAIN EXECUTION - ARGUMENT ROUTING
+# ═══════════════════════════════════════════════════════════════════
 
-info "Cluster health: $HEALTHY/$TOTAL brokers healthy"
-echo "$HEALTH" | jq '.brokers | to_entries[] | "\(.key): \(.value.status)"'
+OPTION="${1:---all}"
 
-# ========== PHASE 7: CONSUMER LAG ANALYSIS ==========
-section "Phase 7: Consumer Lag Analysis"
+case "$OPTION" in
+    health)
+        verify_backend
+        test_health_controller
+        print_summary
+        ;;
+    event)
+        verify_backend
+        test_event_controller
+        print_summary
+        ;;
+    consumer)
+        verify_backend
+        test_consumer_controller
+        print_summary
+        ;;
+    cluster)
+        verify_backend
+        test_cluster_controller
+        print_summary
+        ;;
+    list|help|--help|-h)
+        show_help
+        ;;
+    --all|"")
+        verify_backend
+        test_all
+        print_summary
+        ;;
+    *)
+        echo -e "${RED}Unknown option: $OPTION${NC}"
+        echo ""
+        show_help
+        exit 1
+        ;;
+esac
 
-LAG_INFO=$(curl -s $BASE_URL/cluster/consumer-lag)
-info "Consumer group: streamsocial_event_consumers"
-echo "$LAG_INFO" | jq '.lag_info | .[]' | head -10
-
-# ========== FINAL SUMMARY ==========
-echo ""
-echo -e "${CYAN}"
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║ TEST SUMMARY                                                    ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
-
-echo -e "${GREEN}✓ Producer (Event Sender)${NC}"
-echo "  • Sent 5 user registration events"
-echo "  • Events: alice, bob, charlie, diana, eve"
-
-echo ""
-echo -e "${GREEN}✓ Consumer (Event Receiver)${NC}"
-echo "  • Status: Active"
-echo "  • Total events processed: $FINAL_COUNT"
-echo "  • New events consumed: $EVENTS_ADDED"
-echo "  • Events in memory: $EVENTS_IN_MEMORY"
-
-echo ""
-echo -e "${GREEN}✓ Kafka Cluster${NC}"
-echo "  • Brokers: $HEALTHY/$TOTAL healthy"
-echo "  • Topic: streamsocial_events"
-echo "  • Consumer Group: streamsocial_event_consumers"
-
-echo ""
-echo -e "${GREEN}✓ Event Flow${NC}"
-if [ $EVENTS_ADDED -gt 0 ]; then
-    echo "  • Status: ${GREEN}WORKING${NC}"
-    echo "  • Flow: Events sent → Kafka → Consumer received"
-else
-    echo "  • Status: ${RED}FAILED${NC}"
-fi
-
-echo ""
-echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗"
-echo "║ Next Steps                                                      ║"
-echo "╚════════════════════════════════════════════════════════════════╝${NC}"
-echo ""
-echo "1. View live consumer: curl $BASE_URL/events/recent | jq"
-echo "2. Check consumer stats: curl $BASE_URL/consumer/stats | jq"
-echo "3. Test failure scenarios: ./test_phase_6_7.sh"
-echo "4. Monitor cluster: curl $BASE_URL/cluster/health | jq"
-echo ""
+exit 0

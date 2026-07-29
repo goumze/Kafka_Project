@@ -84,7 +84,11 @@ class StreamSocialEventProducer:
             )
             
             # Get existing topics
-            existing_topics = set(admin_client.list_topics().keys())
+            topics_result = admin_client.list_topics()
+            if isinstance(topics_result, dict):
+                existing_topics = set(topics_result.keys())
+            else:
+                existing_topics = set(topics_result)
             
             # Build list of topics to create
             topics_to_create = []
