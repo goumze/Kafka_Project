@@ -104,6 +104,35 @@ def build_lag_by_topic(
     return lag_by_topic, total_lag, partition_count
 
 
+def build_lag_probe_kwargs(
+    bootstrap_servers: Any,
+    client_id: str,
+    *,
+    consumer_timeout_ms: int = 1000,
+    request_timeout_ms: int = 10000,
+) -> Dict[str, Any]:
+    """
+    Build kwargs for a non-member lag metadata probe consumer.
+
+    - Never sets group_id (must not join worker CONSUMER_GROUP).
+    - Filters to KafkaConsumer.DEFAULT_CONFIG so kafka-python 3.x does not
+      raise KafkaConfigurationError on removed keys such as
+      api_version_auto_timeout_ms.
+    """
+    kwargs: Dict[str, Any] = {
+        "bootstrap_servers": bootstrap_servers,
+        "client_id": client_id,
+        "enable_auto_commit": False,
+        "consumer_timeout_ms": consumer_timeout_ms,
+        "request_timeout_ms": request_timeout_ms,
+    }
+    defaults = getattr(KafkaConsumer, "DEFAULT_CONFIG", {}) or {}
+    if defaults:
+        kwargs = {k: v for k, v in kwargs.items() if k in defaults}
+    kwargs.pop("group_id", None)
+    return kwargs
+
+
 class ConsumerLagService:
     """
     Computes consumer-group lag without joining the worker group.
@@ -133,14 +162,12 @@ class ConsumerLagService:
                 client_id=f"streamsocial-lag-admin-{client_suffix}",
                 request_timeout_ms=15000,
             )
-            # No group_id: must not join streamsocial_event_consumers
+            # Non-member probe: no group_id; configs filtered for kafka-python 3.x.
             probe = KafkaConsumer(
-                bootstrap_servers=self.bootstrap_servers,
-                client_id=f"streamsocial-lag-probe-{client_suffix}",
-                enable_auto_commit=False,
-                consumer_timeout_ms=1000,
-                request_timeout_ms=10000,
-                api_version_auto_timeout_ms=3000,
+                **build_lag_probe_kwargs(
+                    self.bootstrap_servers,
+                    f"streamsocial-lag-probe-{client_suffix}",
+                )
             )
 
             topic_partitions: Dict[str, List[int]] = {}

@@ -87,8 +87,7 @@ async def get_consumer_stats(
         "group_lag": group_lag,
         "total_lag": group_lag.get("total_lag", 0),
         "scale_hint": (
-            "docker compose -f docker-compose.yml -f docker-compose.backend.yml "
-            "up -d --scale kafka-consumer=3"
+            "docker compose up -d --scale kafka-consumer=3"
         ),
     }
 
@@ -145,8 +144,7 @@ async def start_consumer(
         "instance_id": iid,
         "message": (
             "HTTP start of in-process consumers is disabled. "
-            "Scale with: docker compose -f docker-compose.yml "
-            "-f docker-compose.backend.yml up -d --scale kafka-consumer=N. "
+            "Scale with: docker compose up -d --scale kafka-consumer=N. "
             "For single-process local dev set API_EMBED_CONSUMER=true."
         ),
         "api_embed_consumer": settings.api_embed_consumer,

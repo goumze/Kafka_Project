@@ -12,12 +12,10 @@
 
 ```bash
 # from repo root
-docker compose -f docker-compose.yml -f docker-compose.backend.yml up -d --build
-# optional: start with more consumers
-docker compose -f docker-compose.yml -f docker-compose.backend.yml up -d --scale kafka-consumer=1
+docker compose up -d --build
+# optional: start with an explicit consumer count
+docker compose up -d --scale kafka-consumer=1
 ```
-
-Create the shared network if you start files separately; with both `-f` files together the network is created automatically.
 
 ## Produce load
 
@@ -32,7 +30,7 @@ curl -s -X POST http://localhost:8000/events/bulk/generate \
 ```bash
 curl -s http://localhost:8000/metrics | jq .
 curl -s http://localhost:8000/consumer/lag | jq .
-docker compose -f docker-compose.yml -f docker-compose.backend.yml logs -f kafka-consumer
+docker compose logs -f kafka-consumer
 ```
 
 Look for log lines: `lag_report ... total_lag=...`
@@ -40,7 +38,7 @@ Look for log lines: `lag_report ... total_lag=...`
 ## Scale consumers
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.backend.yml up -d --scale kafka-consumer=3 --no-recreate
+docker compose up -d --scale kafka-consumer=3 --no-recreate
 # re-check lag
 watch -n2 'curl -s http://localhost:8000/metrics/lag | jq .total_lag'
 ```

@@ -1,10 +1,11 @@
 """Lag snapshot serialization and pure lag math tests (no broker required)."""
 
-from kafka import TopicPartition
+from kafka import KafkaConsumer, TopicPartition
 
 from metrics.lag_service import (
     LagSnapshot,
     build_lag_by_topic,
+    build_lag_probe_kwargs,
     committed_offset_from_meta,
     partition_lag,
 )
@@ -56,3 +57,21 @@ def test_build_lag_by_topic():
     assert lag_by_topic["user-actions"]["0"]["lag"] == 20
     assert lag_by_topic["user-actions"]["1"]["lag"] == 50
     assert lag_by_topic["system-events"]["0"]["lag"] == 0
+
+
+def test_build_lag_probe_kwargs_non_member_and_compatible():
+    """Probe must not join CONSUMER_GROUP and must use kafka-python-safe configs."""
+    kwargs = build_lag_probe_kwargs(
+        ["kafka-1:29092", "kafka-2:29092"],
+        "streamsocial-lag-probe-test",
+    )
+    assert "group_id" not in kwargs
+    assert "api_version_auto_timeout_ms" not in kwargs
+    assert kwargs["bootstrap_servers"] == ["kafka-1:29092", "kafka-2:29092"]
+    assert kwargs["client_id"] == "streamsocial-lag-probe-test"
+    assert kwargs.get("enable_auto_commit") is False
+
+    defaults = getattr(KafkaConsumer, "DEFAULT_CONFIG", {}) or {}
+    if defaults:
+        unknown = set(kwargs) - set(defaults)
+        assert not unknown, f"unrecognized consumer configs: {unknown}"

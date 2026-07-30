@@ -128,8 +128,7 @@ async def startup_event() -> None:
     else:
         logger.info(
             "Consumer not embedded. Scale workers: "
-            "docker compose -f docker-compose.yml -f docker-compose.backend.yml "
-            "up --scale kafka-consumer=3"
+            "docker compose up -d --scale kafka-consumer=3"
         )
 
 

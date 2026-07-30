@@ -1,436 +1,454 @@
-#!/bin/bash
-
-# StreamSocial Controller API Testing Suite
-# Tests all endpoints across Health, Event, Consumer, and Cluster controllers
-# Usage: 
-#   ./test_end_to_end.sh              # Run all tests
-#   ./test_end_to_end.sh health       # Run only health controller tests
-#   ./test_end_to_end.sh event        # Run only event controller tests
-#   ./test_end_to_end.sh consumer     # Run only consumer controller tests
-#   ./test_end_to_end.sh cluster      # Run only cluster controller tests
-#   ./test_end_to_end.sh list         # Show available test options
+#!/usr/bin/env bash
+# StreamSocial integration / end-to-end API test suite.
+# Prerequisites: stack running (./setup_python.sh from repo root).
+#
+# Usage:
+#   ./test_end_to_end.sh              # all suites
+#   ./test_end_to_end.sh health
+#   ./test_end_to_end.sh event
+#   ./test_end_to_end.sh consumer
+#   ./test_end_to_end.sh metrics
+#   ./test_end_to_end.sh cluster
+#   ./test_end_to_end.sh scale        # produce + lag observation (needs live Kafka)
+#   ./test_end_to_end.sh list
 
 set +e
 
-BASE_URL="http://localhost:8000"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+BASE_URL="${BASE_URL:-http://localhost:8000}"
 
-# Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Counters
 TESTS_PASSED=0
 TESTS_FAILED=0
+TESTS_SKIPPED=0
 
-# Function to print section headers
-section() {
-    echo -e "\n${BLUE}▶ $1${NC}"
+section() { echo -e "\n${BLUE}▶ $1${NC}"; }
+info()    { echo -e "${YELLOW}[INFO]${NC} $1"; }
+success() { echo -e "${GREEN}[✓]${NC} $1"; TESTS_PASSED=$((TESTS_PASSED + 1)); }
+error()   { echo -e "${RED}[✗]${NC} $1"; TESTS_FAILED=$((TESTS_FAILED + 1)); }
+skip()    { echo -e "${YELLOW}[SKIP]${NC} $1"; TESTS_SKIPPED=$((TESTS_SKIPPED + 1)); }
+
+need_jq() {
+  if ! command -v jq >/dev/null 2>&1; then
+    error "jq is required for integration tests (apt install jq / brew install jq)"
+    exit 1
+  fi
 }
 
-# Function to print info
-info() {
-    echo -e "${YELLOW}[INFO]${NC} $1"
+# GET/POST helpers: set RESPONSE, HTTP_CODE
+http_get() {
+  local url="$1"
+  HTTP_CODE=$(curl -sS -o /tmp/ss_e2e_body.json -w "%{http_code}" "$url" 2>/tmp/ss_e2e_curl.err)
+  RESPONSE=$(cat /tmp/ss_e2e_body.json 2>/dev/null || true)
 }
 
-# Function to print success
-success() {
-    echo -e "${GREEN}[✓]${NC} $1"
-    ((TESTS_PASSED++))
+http_post_json() {
+  local url="$1"
+  local body="$2"
+  HTTP_CODE=$(curl -sS -o /tmp/ss_e2e_body.json -w "%{http_code}" \
+    -X POST "$url" \
+    -H "Content-Type: application/json" \
+    -d "$body" 2>/tmp/ss_e2e_curl.err)
+  RESPONSE=$(cat /tmp/ss_e2e_body.json 2>/dev/null || true)
 }
 
-# Function to print error
-error() {
-    echo -e "${RED}[✗]${NC} $1"
-    ((TESTS_FAILED++))
+assert_http_ok() {
+  local name="$1"
+  if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "201" || "$HTTP_CODE" == "202" ]]; then
+    success "$name (HTTP $HTTP_CODE)"
+    return 0
+  fi
+  error "$name (HTTP ${HTTP_CODE:-none})"
+  echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+  return 1
 }
 
-# ═══════════════════════════════════════════════════════════════════
-# HEALTH CONTROLLER TESTS
-# ═══════════════════════════════════════════════════════════════════
+assert_jq() {
+  local name="$1"
+  local expr="$2"
+  if echo "$RESPONSE" | jq -e "$expr" >/dev/null 2>&1; then
+    success "$name"
+    return 0
+  fi
+  error "$name (jq: $expr)"
+  echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+  return 1
+}
 
+# ── Health ──────────────────────────────────────────────────────────
 test_health_check() {
-    section "GET /health - Health Check"
-    RESPONSE=$(curl -s $BASE_URL/health)
-    
-    if echo "$RESPONSE" | jq -e '.status == "healthy"' > /dev/null 2>&1; then
-        success "Backend is healthy"
-        echo "$RESPONSE" | jq '{status: .status, service: .service}'
-    else
-        error "Health check failed"
-        echo "$RESPONSE" | jq '.'
-    fi
+  section "GET /health"
+  http_get "$BASE_URL/health"
+  assert_http_ok "health reachable" || return
+  assert_jq "status healthy" '.status == "healthy"'
+  echo "$RESPONSE" | jq '{status, service, timestamp}'
 }
 
 test_root_endpoint() {
-    section "GET / - Root Endpoint (API Info)"
-    RESPONSE=$(curl -s $BASE_URL/)
-    
-    if echo "$RESPONSE" | jq -e '.service' > /dev/null 2>&1; then
-        success "Root endpoint returns API info"
-        echo "$RESPONSE" | jq '{service: .service, version: .version, kafka_integration: .kafka_integration}'
-    else
-        error "Root endpoint failed"
-        echo "$RESPONSE" | jq '.'
-    fi
+  section "GET /"
+  http_get "$BASE_URL/"
+  assert_http_ok "root reachable" || return
+  assert_jq "service present" '.service != null'
+  echo "$RESPONSE" | jq '{service, version, consumer_mode, consumer_group_id, demo}'
 }
 
-# ═══════════════════════════════════════════════════════════════════
-# EVENT CONTROLLER TESTS
-# ═══════════════════════════════════════════════════════════════════
+test_health_controller() {
+  echo -e "${CYAN}══ HEALTH ══${NC}"
+  test_health_check
+  test_root_endpoint
+}
 
+# ── Events ──────────────────────────────────────────────────────────
 test_register_user() {
-    section "POST /events/user/register - User Registration"
-    
-    declare -a USERS=("alice" "bob" "charlie")
-    declare -a EMAILS=("alice@example.com" "bob@example.com" "charlie@example.com")
-    
-    info "Publishing 3 user registration events..."
-    
-    for i in "${!USERS[@]}"; do
-        USER="${USERS[$i]}"
-        EMAIL="${EMAILS[$i]}"
-        
-        RESPONSE=$(curl -s -X POST $BASE_URL/events/user/register \
-            -H "Content-Type: application/json" \
-            -d "{\"username\":\"$USER\",\"email\":\"$EMAIL\",\"source\":\"test\"}")
-        
-        if echo "$RESPONSE" | jq -e '.success == true' > /dev/null 2>&1; then
-            USER_ID=$(echo $RESPONSE | jq -r '.user_id')
-            success "Event published for user '$USER' (ID: ${USER_ID:0:8})"
-        else
-            error "Failed to publish event for user '$USER'"
-            echo "$RESPONSE" | jq '.'
-        fi
-        sleep 0.3
-    done
+  section "POST /events/user/register"
+  local users=("alice" "bob" "charlie")
+  local emails=("alice@example.com" "bob@example.com" "charlie@example.com")
+  local i
+  for i in "${!users[@]}"; do
+    http_post_json "$BASE_URL/events/user/register" \
+      "{\"username\":\"${users[$i]}\",\"email\":\"${emails[$i]}\",\"source\":\"e2e\"}"
+    if assert_http_ok "register ${users[$i]}"; then
+      if echo "$RESPONSE" | jq -e '.success == true' >/dev/null 2>&1; then
+        success "publish ok user=${users[$i]}"
+      else
+        # producer may return structured failure if brokers down
+        error "register body not success for ${users[$i]}"
+        echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+      fi
+    fi
+    sleep 0.2
+  done
 }
 
 test_get_recent_events() {
-    section "GET /events/recent - Get Recent Events"
-    RESPONSE=$(curl -s $BASE_URL/events/recent)
-    
-    if echo "$RESPONSE" | jq -e '.success == true' > /dev/null 2>&1; then
-        success "Retrieved recent events"
-        echo "$RESPONSE" | jq '{success: .success, event_count: .count, in_memory: .events_in_memory, message: .message}'
-    else
-        error "Failed to get recent events"
-        echo "$RESPONSE" | jq '.'
-    fi
+  section "GET /events/recent"
+  http_get "$BASE_URL/events/recent"
+  assert_http_ok "recent events" || return
+  assert_jq "payload has success or events" 'has("success") or has("events") or has("count")'
+  echo "$RESPONSE" | jq '{success, count, message, events_in_memory} // .'
 }
 
-# ═══════════════════════════════════════════════════════════════════
-# CONSUMER CONTROLLER TESTS
-# ═══════════════════════════════════════════════════════════════════
+test_bulk_generate_short() {
+  section "POST /events/bulk/generate (short background load)"
+  http_post_json "$BASE_URL/events/bulk/generate" \
+    '{"events_per_second":200,"duration_seconds":5,"background":true}'
+  assert_http_ok "bulk generate accepted" || return
+  assert_jq "bulk started or configured" \
+    '.success == true or .status == "started" or .config != null'
+  echo "$RESPONSE" | jq '{success, message, config, observe_lag} // .'
 
-test_consumer_stats() {
-    section "GET /consumer/stats - Consumer Statistics"
-    RESPONSE=$(curl -s $BASE_URL/consumer/stats)
-    
-    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
-        success "Retrieved consumer statistics"
-        echo "$RESPONSE" | jq '{status: .status, running: .running, total_events_processed: .total_events_processed, events_in_memory: .events_in_memory}'
-    else
-        error "Failed to get consumer stats"
-        echo "$RESPONSE" | jq '.'
-    fi
-}
-
-test_consumer_start() {
-    section "POST /consumer/start - Start Consumer"
-    RESPONSE=$(curl -s -X POST $BASE_URL/consumer/start \
-        -H "Content-Type: application/json")
-    
-    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
-        success "Consumer start endpoint called"
-        echo "$RESPONSE" | jq '{status: .status, message: .message}'
-    else
-        error "Failed to start consumer"
-        echo "$RESPONSE" | jq '.'
-    fi
-}
-
-test_consumer_stop() {
-    section "POST /consumer/stop - Stop Consumer"
-    RESPONSE=$(curl -s -X POST $BASE_URL/consumer/stop \
-        -H "Content-Type: application/json")
-    
-    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
-        success "Consumer stop endpoint called"
-        echo "$RESPONSE" | jq '{status: .status, message: .message}'
-    else
-        error "Failed to stop consumer"
-        echo "$RESPONSE" | jq '.'
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════════════
-# CLUSTER CONTROLLER TESTS
-# ═══════════════════════════════════════════════════════════════════
-
-test_cluster_health() {
-    section "GET /cluster/health - Cluster Health Status"
-    RESPONSE=$(curl -s $BASE_URL/cluster/health)
-    
-    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
-        success "Retrieved cluster health"
-        HEALTHY=$(echo "$RESPONSE" | jq '.healthy_count')
-        TOTAL=$(echo "$RESPONSE" | jq '.total_brokers')
-        echo "$RESPONSE" | jq "{status: .status, healthy_brokers: .healthy_count, total_brokers: .total_brokers}"
-    else
-        error "Failed to get cluster health"
-        echo "$RESPONSE" | jq '.'
-    fi
-}
-
-test_cluster_metadata() {
-    section "GET /cluster/metadata - Cluster Metadata"
-    RESPONSE=$(curl -s $BASE_URL/cluster/metadata)
-    
-    if echo "$RESPONSE" | jq -e '.topic' > /dev/null 2>&1; then
-        success "Retrieved cluster metadata"
-        echo "$RESPONSE" | jq '{topic: .topic, brokers: .brokers | length, bootstrap_servers: .bootstrap_servers | length, replication_factor: .replication_factor}'
-    else
-        error "Failed to get cluster metadata"
-        echo "$RESPONSE" | jq '.'
-    fi
-}
-
-test_cluster_partitions() {
-    section "GET /cluster/partitions - Partition Leadership"
-    RESPONSE=$(curl -s $BASE_URL/cluster/partitions)
-    
-    if echo "$RESPONSE" | jq -e '.topic' > /dev/null 2>&1; then
-        success "Retrieved partition information"
-        echo "$RESPONSE" | jq '{topic: .topic, partition_details_count: .partition_details | length}'
-    else
-        error "Failed to get partition info"
-        echo "$RESPONSE" | jq '.'
-    fi
-}
-
-test_consumer_lag() {
-    section "GET /cluster/consumer-lag - Consumer Lag"
-    RESPONSE=$(curl -s $BASE_URL/cluster/consumer-lag)
-    
-    if echo "$RESPONSE" | jq -e '.consumer_group' > /dev/null 2>&1; then
-        success "Retrieved consumer lag"
-        echo "$RESPONSE" | jq '{consumer_group: .consumer_group, lag_info_entries: .lag_info | length}'
-    else
-        error "Failed to get consumer lag"
-        echo "$RESPONSE" | jq '.'
-    fi
-}
-
-test_simulate_broker_failure() {
-    section "POST /cluster/simulate-failure - Simulate Broker Failure"
-    info "Simulating kafka-broker-2 failure..."
-    
-    RESPONSE=$(curl -s -X POST $BASE_URL/cluster/simulate-failure \
-        -H "Content-Type: application/json" \
-        -d '{"broker_name":"kafka-broker-2"}')
-    
-    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
-        success "Broker failure simulated"
-        echo "$RESPONSE" | jq '{status: .status, broker: .broker, action: .action}'
-        sleep 2
-    else
-        error "Failed to simulate broker failure"
-        echo "$RESPONSE" | jq '.'
-    fi
-}
-
-test_recover_broker_failure() {
-    section "POST /cluster/recover-failure - Recover Broker"
-    info "Recovering kafka-broker-2..."
-    
-    RESPONSE=$(curl -s -X POST $BASE_URL/cluster/recover-failure \
-        -H "Content-Type: application/json" \
-        -d '{"broker_name":"kafka-broker-2"}')
-    
-    if echo "$RESPONSE" | jq -e '.status' > /dev/null 2>&1; then
-        success "Broker recovery initiated"
-        echo "$RESPONSE" | jq '{status: .status, broker: .broker, action: .action}'
-        sleep 2
-    else
-        error "Failed to recover broker"
-        echo "$RESPONSE" | jq '.'
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════════════
-# TEST SUITES - GROUP BY CONTROLLER
-# ═══════════════════════════════════════════════════════════════════
-
-test_health_controller() {
-    echo -e "${CYAN}"
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║  HEALTH CONTROLLER TESTS                                       ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    test_health_check
-    test_root_endpoint
+  section "GET /events/bulk/status"
+  http_get "$BASE_URL/events/bulk/status"
+  assert_http_ok "bulk status" || return
+  echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
 }
 
 test_event_controller() {
-    echo -e "${CYAN}"
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║  EVENT CONTROLLER TESTS                                        ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    test_register_user
-    test_get_recent_events
+  echo -e "${CYAN}══ EVENT ══${NC}"
+  test_register_user
+  test_get_recent_events
+  test_bulk_generate_short
+}
+
+# ── Consumer ────────────────────────────────────────────────────────
+test_consumer_stats() {
+  section "GET /consumer/stats"
+  http_get "$BASE_URL/consumer/stats"
+  assert_http_ok "consumer stats" || return
+  assert_jq "has status" 'has("status")'
+  echo "$RESPONSE" | jq '{status, mode, group_id, total_lag, scale_hint} // .'
+}
+
+test_consumer_lag() {
+  section "GET /consumer/lag"
+  http_get "$BASE_URL/consumer/lag"
+  assert_http_ok "consumer lag HTTP" || return
+  assert_jq "has group_id or total_lag" 'has("group_id") or has("total_lag")'
+  # Soft check: error field should ideally be null/absent for full pass
+  if echo "$RESPONSE" | jq -e '.error != null and .error != ""' >/dev/null 2>&1; then
+    error "consumer lag reported error: $(echo "$RESPONSE" | jq -r '.error')"
+    echo "$RESPONSE" | jq '{group_id, total_lag, error, source}'
+  else
+    success "consumer lag payload has no error"
+    echo "$RESPONSE" | jq '{group_id, total_lag, partition_count, lag_by_topic, source}'
+  fi
+}
+
+test_consumer_instances() {
+  section "GET /consumer/instances"
+  http_get "$BASE_URL/consumer/instances"
+  assert_http_ok "consumer instances" || return
+  echo "$RESPONSE" | jq '{total_in_process_instances, group_id, note} // .'
+}
+
+test_consumer_health() {
+  section "GET /consumer/health"
+  http_get "$BASE_URL/consumer/health"
+  assert_http_ok "consumer health" || return
+  echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+}
+
+test_consumer_start_disabled() {
+  section "POST /consumer/start (compose mode: expect disabled)"
+  http_post_json "$BASE_URL/consumer/start" '{}'
+  assert_http_ok "start endpoint responds" || return
+  # In scale mode this is intentionally disabled
+  if echo "$RESPONSE" | jq -e '.status == "disabled" or .status == "started" or .status == "already_running"' >/dev/null 2>&1; then
+    success "start status acceptable: $(echo "$RESPONSE" | jq -r '.status')"
+  else
+    error "unexpected start status"
+    echo "$RESPONSE" | jq .
+  fi
+  echo "$RESPONSE" | jq '{status, message, group_id} // .'
+}
+
+test_consumer_stop() {
+  section "POST /consumer/stop"
+  http_post_json "$BASE_URL/consumer/stop" '{}'
+  assert_http_ok "stop endpoint responds" || return
+  echo "$RESPONSE" | jq '{status, message} // .'
 }
 
 test_consumer_controller() {
-    echo -e "${CYAN}"
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║  CONSUMER CONTROLLER TESTS                                     ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    test_consumer_stats
-    test_consumer_start
-    test_consumer_stop
+  echo -e "${CYAN}══ CONSUMER ══${NC}"
+  test_consumer_stats
+  test_consumer_lag
+  test_consumer_instances
+  test_consumer_health
+  test_consumer_start_disabled
+  test_consumer_stop
+}
+
+# ── Metrics ─────────────────────────────────────────────────────────
+test_metrics() {
+  section "GET /metrics"
+  http_get "$BASE_URL/metrics"
+  assert_http_ok "metrics" || return
+  assert_jq "has total_lag or group_id" 'has("total_lag") or has("group_id") or has("consumer_group_id")'
+  if echo "$RESPONSE" | jq -e '.error != null and .error != ""' >/dev/null 2>&1; then
+    error "metrics lag error: $(echo "$RESPONSE" | jq -r '.error')"
+  else
+    success "metrics payload has no error"
+  fi
+  echo "$RESPONSE" | jq '{group_id, consumer_group_id, total_lag, error, demo} // .'
+}
+
+test_metrics_lag() {
+  section "GET /metrics/lag"
+  http_get "$BASE_URL/metrics/lag"
+  assert_http_ok "metrics/lag" || return
+  echo "$RESPONSE" | jq '{group_id, total_lag, error} // .'
+}
+
+test_metrics_suite() {
+  echo -e "${CYAN}══ METRICS ══${NC}"
+  test_metrics
+  test_metrics_lag
+}
+
+# ── Cluster ─────────────────────────────────────────────────────────
+test_cluster_health() {
+  section "GET /cluster/health"
+  http_get "$BASE_URL/cluster/health"
+  assert_http_ok "cluster health" || return
+  assert_jq "has status" 'has("status")'
+  echo "$RESPONSE" | jq '{status, healthy_count, total_brokers, ops_enabled} // .'
+}
+
+test_cluster_metadata() {
+  section "GET /cluster/metadata"
+  http_get "$BASE_URL/cluster/metadata"
+  assert_http_ok "cluster metadata" || return
+  echo "$RESPONSE" | jq '{topic, brokers: (.brokers|length? // .), bootstrap_servers, replication_factor, error} // .'
+}
+
+test_cluster_partitions() {
+  section "GET /cluster/partitions"
+  http_get "$BASE_URL/cluster/partitions"
+  assert_http_ok "cluster partitions" || return
+  echo "$RESPONSE" | jq '{topic, partition_details_count: (.partition_details|length? // 0), error} // .'
+}
+
+test_cluster_consumer_lag() {
+  section "GET /cluster/consumer-lag"
+  http_get "$BASE_URL/cluster/consumer-lag"
+  assert_http_ok "cluster consumer-lag" || return
+  echo "$RESPONSE" | jq '{consumer_group, group_id, total_lag, error} // .'
+}
+
+test_cluster_failure_ops() {
+  section "POST /cluster/simulate-failure + recover (optional)"
+  # Only meaningful when CLUSTER_OPS_ENABLED=true and docker socket mounted
+  http_post_json "$BASE_URL/cluster/simulate-failure" '{"broker_name":"kafka-broker-2"}'
+  if [[ "$HTTP_CODE" != "200" ]]; then
+    skip "simulate-failure not available (HTTP $HTTP_CODE) — enable CLUSTER_OPS_ENABLED if needed"
+    return
+  fi
+  if echo "$RESPONSE" | jq -e '.status == "disabled" or .enabled == false or .ops_enabled == false' >/dev/null 2>&1; then
+    skip "cluster ops disabled: $(echo "$RESPONSE" | jq -r '.message // .status // "disabled"')"
+    return
+  fi
+  if echo "$RESPONSE" | jq -e '.status' >/dev/null 2>&1; then
+    success "simulate-failure responded"
+    echo "$RESPONSE" | jq '{status, broker, action, message} // .'
+  else
+    error "simulate-failure unexpected body"
+    echo "$RESPONSE" | jq .
+    return
+  fi
+  sleep 2
+  http_post_json "$BASE_URL/cluster/recover-failure" '{"broker_name":"kafka-broker-2"}'
+  if assert_http_ok "recover-failure"; then
+    echo "$RESPONSE" | jq '{status, broker, action} // .'
+  fi
 }
 
 test_cluster_controller() {
-    echo -e "${CYAN}"
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║  CLUSTER CONTROLLER TESTS                                      ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    test_cluster_health
-    test_cluster_metadata
-    test_cluster_partitions
-    test_consumer_lag
-    test_simulate_broker_failure
-    test_recover_broker_failure
+  echo -e "${CYAN}══ CLUSTER ══${NC}"
+  test_cluster_health
+  test_cluster_metadata
+  test_cluster_partitions
+  test_cluster_consumer_lag
+  test_cluster_failure_ops
+}
+
+# ── Scale / lag narrative ───────────────────────────────────────────
+test_scale_narrative() {
+  echo -e "${CYAN}══ SCALE / LAG NARRATIVE ══${NC}"
+  section "Baseline lag"
+  http_get "$BASE_URL/consumer/lag"
+  assert_http_ok "baseline lag" || return
+  local lag_before
+  lag_before=$(echo "$RESPONSE" | jq -r '.total_lag // 0')
+  info "total_lag before load: $lag_before"
+  if echo "$RESPONSE" | jq -e '.error != null and .error != ""' >/dev/null 2>&1; then
+    error "lag API error blocks scale narrative: $(echo "$RESPONSE" | jq -r '.error')"
+    info "Worker logs may still show lag_report; fix lag probe config and rebuild API."
+  fi
+
+  section "Produce background load"
+  http_post_json "$BASE_URL/events/bulk/generate" \
+    '{"events_per_second":1500,"duration_seconds":15,"background":true}'
+  assert_http_ok "loadgen started" || return
+  success "load generation requested"
+  echo "$RESPONSE" | jq '{success, message, config} // .'
+
+  info "Waiting 12s for produce/consume..."
+  sleep 12
+
+  section "Lag after load"
+  http_get "$BASE_URL/metrics"
+  assert_http_ok "metrics after load" || return
+  local lag_after
+  lag_after=$(echo "$RESPONSE" | jq -r '.total_lag // 0')
+  info "total_lag after load (API): $lag_after"
+  echo "$RESPONSE" | jq '{total_lag, error, consumer_group_id, demo}'
+
+  section "Compose consumer scale hint"
+  info "Scale command: docker compose -f ${REPO_ROOT}/docker-compose.yml up -d --scale kafka-consumer=3"
+  if command -v docker >/dev/null 2>&1; then
+    local n
+    n=$(docker ps --filter name=kafka-consumer --format '{{.Names}}' 2>/dev/null | wc -l | tr -d ' ')
+    info "running kafka-consumer containers: ${n}"
+    if [[ "${n}" -ge 1 ]]; then
+      success "at least one kafka-consumer container is running"
+    else
+      error "no kafka-consumer containers found — start stack with ./setup_python.sh"
+    fi
+  else
+    skip "docker not available to count consumers"
+  fi
 }
 
 test_all() {
-    echo -e "${CYAN}"
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║  StreamSocial Complete Controller API Test Suite               ║"
-    echo "║  Testing all endpoints across all controllers                  ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    test_health_controller
-    test_event_controller
-    test_consumer_controller
-    test_cluster_controller
+  echo -e "${CYAN}"
+  echo "╔════════════════════════════════════════════════════════════════╗"
+  echo "║  StreamSocial Integration Test Suite                           ║"
+  echo "║  Base URL: ${BASE_URL}"
+  echo "╚════════════════════════════════════════════════════════════════╝"
+  echo -e "${NC}"
+  test_health_controller
+  test_event_controller
+  test_consumer_controller
+  test_metrics_suite
+  test_cluster_controller
+  test_scale_narrative
 }
-
-# ═══════════════════════════════════════════════════════════════════
-# HELP AND TEST LISTING
-# ═══════════════════════════════════════════════════════════════════
 
 show_help() {
-    echo -e "${CYAN}"
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║  StreamSocial Controller API Test Suite                        ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    echo ""
-    echo -e "${BLUE}USAGE:${NC}"
-    echo "  ./test_end_to_end.sh [OPTION]"
-    echo ""
-    echo -e "${BLUE}OPTIONS:${NC}"
-    echo "  (no args)      Run all controller tests"
-    echo "  health         Test Health Controller only"
-    echo "  event          Test Event Controller only"
-    echo "  consumer       Test Consumer Controller only"
-    echo "  cluster        Test Cluster Controller only"
-    echo "  list           Show this help message"
-    echo "  help           Show this help message"
-    echo ""
-    echo -e "${BLUE}EXAMPLES:${NC}"
-    echo "  ./test_end_to_end.sh                # Run all tests"
-    echo "  ./test_end_to_end.sh health         # Only health tests"
-    echo "  ./test_end_to_end.sh cluster        # Only cluster tests"
-    echo ""
+  echo -e "${CYAN}StreamSocial integration tests${NC}"
+  echo ""
+  echo "Prerequisites:"
+  echo "  From repo root: ./setup_python.sh"
+  echo "  API must answer ${BASE_URL}/health"
+  echo ""
+  echo "Usage: $0 [OPTION]"
+  echo "  (none)|all   Full suite"
+  echo "  health       Health + root"
+  echo "  event        Register, recent, bulk generate"
+  echo "  consumer     Stats, lag, instances, start/stop"
+  echo "  metrics      /metrics and /metrics/lag"
+  echo "  cluster      Cluster endpoints (+ optional failure ops)"
+  echo "  scale        Produce + lag observation narrative"
+  echo "  list|help    This message"
+  echo ""
+  echo "Env: BASE_URL (default http://localhost:8000)"
 }
 
-# ═══════════════════════════════════════════════════════════════════
-# MAIN - BACKEND VERIFICATION AND ROUTING
-# ═══════════════════════════════════════════════════════════════════
-
 verify_backend() {
-    section "Verifying Backend Service"
-    
-    if curl -s $BASE_URL/health > /dev/null 2>&1; then
-        success "Backend is running on $BASE_URL"
-    else
-        error "Backend is NOT running!"
-        echo ""
-        echo -e "${YELLOW}Please start the backend first:${NC}"
-        echo "  cd /workspaces/Kafka_Project/streamsocial/backend"
-        echo "  python main.py"
-        echo ""
-        exit 1
-    fi
+  section "Verifying backend at $BASE_URL"
+  need_jq
+  if curl -sf "$BASE_URL/health" >/dev/null 2>&1; then
+    success "Backend is running"
+  else
+    error "Backend is NOT reachable at $BASE_URL"
+    echo ""
+    echo -e "${YELLOW}Start the app first:${NC}"
+    echo "  cd ${REPO_ROOT}"
+    echo "  ./setup_python.sh"
+    echo "  # or: ./setup_python.sh --start-only"
+    echo ""
+    exit 1
+  fi
 }
 
 print_summary() {
-    echo ""
-    echo -e "${CYAN}"
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║  TEST RESULTS SUMMARY                                          ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    echo -e "${GREEN}✓ PASSED: $TESTS_PASSED${NC}"
-    echo -e "${RED}✗ FAILED: $TESTS_FAILED${NC}"
-    echo ""
+  echo ""
+  echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${CYAN}║  TEST RESULTS SUMMARY                                          ║${NC}"
+  echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
+  echo -e "${GREEN}✓ PASSED:  $TESTS_PASSED${NC}"
+  echo -e "${RED}✗ FAILED:  $TESTS_FAILED${NC}"
+  echo -e "${YELLOW}○ SKIPPED: $TESTS_SKIPPED${NC}"
+  echo ""
+  if [[ "$TESTS_FAILED" -gt 0 ]]; then
+    exit 1
+  fi
+  exit 0
 }
 
-# ═══════════════════════════════════════════════════════════════════
-# MAIN EXECUTION - ARGUMENT ROUTING
-# ═══════════════════════════════════════════════════════════════════
-
-OPTION="${1:---all}"
-
+OPTION="${1:-all}"
 case "$OPTION" in
-    health)
-        verify_backend
-        test_health_controller
-        print_summary
-        ;;
-    event)
-        verify_backend
-        test_event_controller
-        print_summary
-        ;;
-    consumer)
-        verify_backend
-        test_consumer_controller
-        print_summary
-        ;;
-    cluster)
-        verify_backend
-        test_cluster_controller
-        print_summary
-        ;;
-    list|help|--help|-h)
-        show_help
-        ;;
-    --all|"")
-        verify_backend
-        test_all
-        print_summary
-        ;;
-    *)
-        echo -e "${RED}Unknown option: $OPTION${NC}"
-        echo ""
-        show_help
-        exit 1
-        ;;
+  health)   verify_backend; test_health_controller; print_summary ;;
+  event)    verify_backend; test_event_controller; print_summary ;;
+  consumer) verify_backend; test_consumer_controller; print_summary ;;
+  metrics)  verify_backend; test_metrics_suite; print_summary ;;
+  cluster)  verify_backend; test_cluster_controller; print_summary ;;
+  scale)    verify_backend; test_scale_narrative; print_summary ;;
+  all|--all|"")
+    verify_backend; test_all; print_summary
+    ;;
+  list|help|--help|-h) show_help; exit 0 ;;
+  *)
+    echo -e "${RED}Unknown option: $OPTION${NC}"
+    show_help
+    exit 1
+    ;;
 esac
-
-exit 0

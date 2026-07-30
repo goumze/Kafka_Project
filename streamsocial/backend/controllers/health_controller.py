@@ -37,8 +37,7 @@ async def root() -> Dict[str, Any]:
         "demo": {
             "narrative": "produce load -> observe lag -> scale consumers -> lag drains",
             "scale": (
-                "docker compose -f docker-compose.yml -f docker-compose.backend.yml "
-                "up -d --scale kafka-consumer=N"
+                "docker compose up -d --scale kafka-consumer=N"
             ),
         },
         "endpoints": {

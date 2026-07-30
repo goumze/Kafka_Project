@@ -62,6 +62,7 @@ class StreamSocialEventProducer:
         if isinstance(acks, str) and acks.isdigit():
             acks = int(acks)
 
+        # kafka-python 3.x dropped api_version_auto_timeout_ms; filter via DEFAULT_CONFIG.
         base_kwargs = {
             "bootstrap_servers": self.bootstrap_servers,
             "acks": acks,
@@ -70,7 +71,6 @@ class StreamSocialEventProducer:
             "batch_size": self.settings.producer_batch_size,
             "linger_ms": self.settings.producer_linger_ms,
             "request_timeout_ms": 30000,
-            "api_version_auto_timeout_ms": 3000,
             "key_serializer": lambda k: k.encode("utf-8") if isinstance(k, str) else k,
             # Bytes pass-through; callers encode JSON to bytes before send.
             "value_serializer": lambda v: v if isinstance(v, (bytes, bytearray)) else (

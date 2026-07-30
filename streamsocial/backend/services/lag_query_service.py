@@ -51,8 +51,7 @@ class LagQueryService:
                         self.settings.consumer_processing_delay_ms
                     ),
                     "scale_hint": (
-                        "docker compose -f docker-compose.yml "
-                        "-f docker-compose.backend.yml up -d --scale kafka-consumer=N"
+                        "docker compose up -d --scale kafka-consumer=N"
                     ),
                 },
                 "observed_at": datetime.now(timezone.utc).isoformat(),

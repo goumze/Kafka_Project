@@ -19,7 +19,7 @@ This repo (`streamsocial/backend`) is a Kafka demo platform:
 - **Stack**: Python 3, `kafka-python`, FastAPI, Pydantic, Docker Compose multi-broker cluster
 - **Demo narrative**: flood produce → lag rises (API + logs) → `docker compose scale` consumers → lag drains
 
-Prefer repo-local conventions. Read existing modules before rewriting. **Keep `docker-compose.yml` / `docker-compose.backend.yml` as first-class deliverables** whenever consumer topology or entrypoints change.
+Prefer repo-local conventions. Read existing modules before rewriting. **Keep the single `docker-compose.yml` (brokers + API + scalable kafka-consumer) as a first-class deliverable** whenever consumer topology or entrypoints change.
 
 ## When to use this agent
 

@@ -121,11 +121,11 @@ Runs **only** after PASS or PASS_WITH_NITS. You execute the app and smoke the la
 
 **Preferred path (Compose):**
 
-1. Ensure Compose files resolve:
-   - `docker compose -f docker-compose.yml -f docker-compose.backend.yml config --services`
+1. Ensure Compose resolves:
+   - `docker compose config --services`
    - Expect `backend-api`, `kafka-consumer`, brokers
 2. Start stack (if not already healthy):
-   - `docker compose -f docker-compose.yml -f docker-compose.backend.yml up -d --build`
+   - `docker compose up -d --build`
    - Wait for `backend-api` health (`curl -sf http://localhost:8000/health`)
 3. Functional smoke sequence:
    - `GET /health` → 200

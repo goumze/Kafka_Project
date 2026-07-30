@@ -28,7 +28,7 @@ Expected logical layers (validate against these even if folders differ today):
 | Domain / models | Events, types, pure data rules | `models/` |
 | Messaging | Kafka produce/consume only | `producers/`, `consumers/` |
 | Config | Topics, partitions, env settings | `config/` |
-| Infrastructure | Docker, process entrypoints, wiring | `Dockerfile`, `docker-compose*.yml` |
+| Infrastructure | Docker, process entrypoints, wiring | `Dockerfile`, `docker-compose.yml` |
 | Tests | Unit/integration aligned to layers | `tests/` |
 
 ## When to pick this agent
