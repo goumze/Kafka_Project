@@ -1,18 +1,30 @@
 """
 Event Controller
-Handles event operations: registration, publishing, and bulk data generation.
+HTTP validation/response only; publishing and loadgen live in services.
 """
 
+from __future__ import annotations
+
+import logging
 import uuid
-from datetime import datetime
-from fastapi import APIRouter, Query
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
 
 from models.events import EventType
-from producers.data_generator import StreamSocialDataGenerator, GenerationConfig
+from producers.event_producer import StreamSocialEventProducer
+from services.lag_query_service import LagQueryService
+from services.load_generation_service import LoadGenerationService, LoadGenRequest
+
+logger = logging.getLogger("streamsocial.event_api")
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+_producer: Optional[StreamSocialEventProducer] = None
+_consumer: Optional[Any] = None
+_loadgen: LoadGenerationService = LoadGenerationService()
+_lag: Optional[LagQueryService] = None
 
 
 class UserRegistration(BaseModel):
@@ -21,125 +33,108 @@ class UserRegistration(BaseModel):
     source: str = "web"
 
 
-class BulkGenerationRequest(BaseModel):
-    """Request body for bulk event generation"""
-    events_per_second: int = 1000
-    duration_seconds: int = 60
-    num_unique_users: int = 10000
-    num_unique_content: int = 50000
+class BulkGenerationRequest(LoadGenRequest):
+    """Request body for bulk event generation (alias of service model)."""
+
+    pass
 
 
-def set_producer(producer):
-    """Inject producer dependency"""
+def set_producer(producer: Optional[StreamSocialEventProducer]) -> None:
     global _producer
     _producer = producer
 
 
-def set_consumer(consumer):
-    """Inject consumer dependency"""
+def set_consumer(consumer: Optional[Any]) -> None:
     global _consumer
     _consumer = consumer
 
 
-_producer: Optional[object] = None
-_consumer: Optional[object] = None
+def set_load_generation_service(service: LoadGenerationService) -> None:
+    global _loadgen
+    _loadgen = service
+
+
+def set_lag_query_service(service: LagQueryService) -> None:
+    global _lag
+    _lag = service
+
+
+def _lag_service() -> LagQueryService:
+    global _lag
+    if _lag is None:
+        _lag = LagQueryService()
+    return _lag
 
 
 @router.post("/user/register")
-async def register_user(registration: UserRegistration):
+async def register_user(registration: UserRegistration) -> Dict[str, Any]:
     """Register a user and publish the event to Kafka"""
     user_id = str(uuid.uuid4())
-    
-    # Publish event to Kafka
+    if _producer is None:
+        logger.error("register_user failed: producer not configured")
+        return {
+            "success": False,
+            "user_id": user_id,
+            "error": "Producer not configured",
+        }
     try:
         _producer.publish_event(
             event_type=EventType.USER_REGISTRATION,
             user_id=user_id,
-            data={"username": registration.username, "email": registration.email}
+            data={
+                "username": registration.username,
+                "email": registration.email,
+                "source": registration.source,
+            },
+            flush=True,
         )
         return {
             "success": True,
             "user_id": user_id,
-            "message": "User registration event published to Kafka"
+            "message": "User registration event published to Kafka",
         }
-    except Exception as e:
-        return {
-            "success": False,
-            "user_id": user_id,
-            "error": str(e)
-        }
+    except Exception as exc:
+        logger.exception("Failed to publish user registration user_id=%s", user_id)
+        return {"success": False, "user_id": user_id, "error": str(exc)}
 
 
 @router.post("/bulk/generate")
-async def bulk_generate_events(request: BulkGenerationRequest):
+async def bulk_generate_events(request: BulkGenerationRequest) -> Dict[str, Any]:
     """
     Generate bulk events for load testing and consumer lag demonstration.
-    
-    This endpoint generates a high-volume stream of realistic events
-    to test producer throughput and demonstrate consumer lag behavior.
-    
-    Parameters:
-    - events_per_second: Target publishing rate (default: 1000)
-    - duration_seconds: How long to generate events (default: 60)
-    - num_unique_users: Number of unique user IDs (default: 10000)
-    - num_unique_content: Number of unique content IDs (default: 50000)
-    
-    Example usage:
-    POST /events/bulk/generate
-    {
-        "events_per_second": 5000,
-        "duration_seconds": 120,
-        "num_unique_users": 50000
-    }
+    Prefer background=true so lag can be observed while production continues.
     """
-    try:
-        # Create configuration
-        config = GenerationConfig(
-            events_per_second=request.events_per_second,
-            duration_seconds=request.duration_seconds,
-            num_unique_users=request.num_unique_users,
-            num_unique_content=request.num_unique_content,
-        )
-        
-        # Generate events
-        generator = StreamSocialDataGenerator()
-        stats = generator.generate(config)
-        generator.close()
-        
-        return {
-            "success": True,
-            "message": f"Generated {stats['total_events']:,} events",
-            "statistics": {
-                "total_events": stats['total_events'],
-                "duration_seconds": stats['duration_seconds'],
-                "average_throughput": stats['avg_throughput'],
-                "errors": stats['errors'],
-                "events_by_type": stats['events_by_type'],
-            }
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+    return _loadgen.generate(request)
+
+
+@router.get("/bulk/status")
+async def bulk_generate_status() -> Dict[str, Any]:
+    return _loadgen.status()
 
 
 @router.get("/recent")
-async def get_recent_events():
-    """Get recently consumed events"""
+async def get_recent_events() -> Dict[str, Any]:
+    """Recent events from in-process consumer (if any) plus group lag."""
+    group_lag = _lag_service().get_lag_dict()
     if _consumer is None:
         return {
             "success": True,
             "events": [],
             "count": 0,
-            "message": "Consumer not yet initialized"
+            "message": (
+                "No in-process consumer. Events are consumed by kafka-consumer workers. "
+                "Use /metrics or /consumer/lag for group lag."
+            ),
+            "total_lag": group_lag.get("total_lag", 0),
+            "group_lag": group_lag,
         }
-    
+
     stats = _consumer.get_stats()
     return {
         "success": True,
-        "events": stats['recent_events'],
-        "count": stats['total_events'],
-        "events_in_memory": len(stats['recent_events']),
-        "total_lag": stats.get('total_lag', 0),
+        "events": stats["recent_events"],
+        "count": stats["total_events"],
+        "events_in_memory": len(stats["recent_events"]),
+        "total_lag": stats.get("total_lag", 0),
+        "group_lag": group_lag,
     }

@@ -1,47 +1,58 @@
 """
 Health Controller
-Handles health checks and API root endpoint information.
 """
 
-from datetime import datetime
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict
+
 from fastapi import APIRouter
+
+from config.settings import get_settings
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health_check():
-    """Health check endpoint"""
+async def health_check() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "service": "StreamSocial Backend",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @router.get("/")
-async def root():
-    """Root endpoint with API information"""
+async def root() -> Dict[str, Any]:
+    settings = get_settings()
     return {
         "service": "StreamSocial Event-Driven Backend",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "kafka_integration": "enabled",
-        "consumer_status": "running (check /consumer/stats)",
-        "phase_6_enabled": True,
-        "phase_7_enabled": True,
+        "consumer_mode": (
+            "embedded" if settings.api_embed_consumer else "compose_workers"
+        ),
+        "consumer_group_id": settings.consumer_group_id,
+        "demo": {
+            "narrative": "produce load -> observe lag -> scale consumers -> lag drains",
+            "scale": (
+                "docker compose -f docker-compose.yml -f docker-compose.backend.yml "
+                "up -d --scale kafka-consumer=N"
+            ),
+        },
         "endpoints": {
             "health": "GET /health",
+            "metrics": "GET /metrics",
+            "metrics_lag": "GET /metrics/lag",
             "register_user": "POST /events/user/register",
+            "bulk_generate": "POST /events/bulk/generate",
             "get_events": "GET /events/recent",
             "consumer_stats": "GET /consumer/stats",
-            "consumer_start": "POST /consumer/start",
-            "consumer_stop": "POST /consumer/stop",
+            "consumer_lag": "GET /consumer/lag",
+            "consumer_start": "POST /consumer/start (disabled; use Compose scale)",
+            "consumer_stop": "POST /consumer/stop (embedded only)",
             "cluster_health": "GET /cluster/health",
             "cluster_metadata": "GET /cluster/metadata",
-            "cluster_partitions": "GET /cluster/partitions",
-            "consumer_lag": "GET /cluster/consumer-lag",
-            "simulate_failure": "POST /cluster/simulate-failure",
-            "recover_failure": "POST /cluster/recover-failure",
-            "rebalance_consumers": "POST /cluster/rebalance-consumers"
-        }
+        },
     }

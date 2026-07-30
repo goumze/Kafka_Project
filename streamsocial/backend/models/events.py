@@ -70,7 +70,6 @@ class StreamSocialEvent(BaseModel):
     
     event_id: str = Field(
         description="Unique event identifier (UUID)",
-        example="550e8400-e29b-41d4-a716-446655440000"
     )
     event_type: EventType = Field(
         description="Type of event (determines target topic)"
@@ -90,8 +89,8 @@ class StreamSocialEvent(BaseModel):
         description="Event-specific payload (structure varies by event_type)"
     )
     
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "event_id": "550e8400-e29b-41d4-a716-446655440000",
                 "event_type": "user_post_create",
@@ -105,6 +104,7 @@ class StreamSocialEvent(BaseModel):
                 }
             }
         }
+    }
 
 
 class UserActionEvent(StreamSocialEvent):

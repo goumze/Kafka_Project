@@ -1,20 +1,43 @@
-version: '3.8'
+# Extends docker-compose.yml (Kafka brokers) with API + scalable consumers.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.backend.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.backend.yml up -d --scale kafka-consumer=3
+#
+# Demo:
+#   1. POST http://localhost:8000/events/bulk/generate
+#   2. GET  http://localhost:8000/metrics   (watch total_lag)
+#   3. scale kafka-consumer and watch lag drain
 
-# This file extends the base docker-compose.yml with backend application services
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.backend.yml up
+x-backend-env: &backend-env
+  KAFKA_BROKERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+  CONSUMER_GROUP: streamsocial_event_consumers
+  LOG_LEVEL: INFO
+  # Demo partitions (enough for multi-replica scale; override as needed)
+  PARTITIONS_USER_ACTIONS: "24"
+  PARTITIONS_CONTENT_INTERACTIONS: "12"
+  PARTITIONS_SYSTEM_EVENTS: "6"
+  KAFKA_REPLICATION_FACTOR: "3"
+  # Producer throughput
+  PRODUCER_LINGER_MS: "50"
+  PRODUCER_BATCH_SIZE: "32768"
+  PRODUCER_COMPRESSION: gzip
+  LOADGEN_BURST_SIZE: "100"
+  # Consumer lag demo: processing delay makes lag easy to induce with 1 replica
+  CONSUMER_PROCESSING_DELAY_MS: "5"
+  CONSUMER_MAX_POLL_RECORDS: "50"
+  CONSUMER_LAG_LOG_INTERVAL_SEC: "5"
+  API_EMBED_CONSUMER: "false"
 
 services:
-  # Backend API Server
   backend-api:
     build:
       context: ./streamsocial/backend
       dockerfile: Dockerfile
-    container_name: streamsocial-api
+    # no fixed container_name so compose project naming stays flexible
     ports:
       - "8000:8000"
     environment:
-      KAFKA_BROKERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
-      LOG_LEVEL: INFO
+      <<: *backend-env
     depends_on:
       kafka-1:
         condition: service_healthy
@@ -29,70 +52,35 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
-    volumes:
-      - ./streamsocial/backend:/app
+      start_period: 40s
+    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
-  # Consumer Instance 1 (Horizontal Scaling)
-  # Uncomment to run additional consumer instances in the same consumer group
-  # They will automatically rebalance partitions among themselves
-  # consumer-instance-1:
-  #   build:
-  #     context: ./streamsocial/backend
-  #     dockerfile: Dockerfile
-  #   container_name: consumer-instance-1
-  #   environment:
-  #     KAFKA_BROKERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
-  #     INSTANCE_ID: consumer-1
-  #     CONSUMER_GROUP: streamsocial_event_consumers
-  #   depends_on:
-  #     kafka-1:
-  #       condition: service_healthy
-  #   networks:
-  #     - kafka-network
-  #   command: python consumer_manager.py --instance-id consumer-1
-  #   volumes:
-  #     - ./streamsocial/backend:/app
+  # Horizontally scalable consumer workers (same CONSUMER_GROUP).
+  # Scale with: --scale kafka-consumer=N
+  kafka-consumer:
+    build:
+      context: ./streamsocial/backend
+      dockerfile: Dockerfile
+    environment:
+      <<: *backend-env
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      backend-api:
+        condition: service_started
+    networks:
+      - kafka-network
+    command: ["python", "-m", "workers.consumer_worker"]
+    stop_grace_period: 20s
+    restart: unless-stopped
+    # default one replica; scale out for lag drain demo
+    deploy:
+      replicas: 1
 
-  # Consumer Instance 2
-  # consumer-instance-2:
-  #   build:
-  #     context: ./streamsocial/backend
-  #     dockerfile: Dockerfile
-  #   container_name: consumer-instance-2
-  #   environment:
-  #     KAFKA_BROKERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
-  #     INSTANCE_ID: consumer-2
-  #     CONSUMER_GROUP: streamsocial_event_consumers
-  #   depends_on:
-  #     kafka-1:
-  #       condition: service_healthy
-  #   networks:
-  #     - kafka-network
-  #   command: python consumer_manager.py --instance-id consumer-2
-  #   volumes:
-  #     - ./streamsocial/backend:/app
-
-  # Consumer Instance 3
-  # consumer-instance-3:
-  #   build:
-  #     context: ./streamsocial/backend
-  #     dockerfile: Dockerfile
-  #   container_name: consumer-instance-3
-  #   environment:
-  #     KAFKA_BROKERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
-  #     INSTANCE_ID: consumer-3
-  #     CONSUMER_GROUP: streamsocial_event_consumers
-  #   depends_on:
-  #     kafka-1:
-  #       condition: service_healthy
-  #   networks:
-  #     - kafka-network
-  #   command: python consumer_manager.py --instance-id consumer-3
-  #   volumes:
-  #     - ./streamsocial/backend:/app
-
-# Use the existing kafka-network from docker-compose.yml
 networks:
   kafka-network:
-    external: true
+    driver: bridge
