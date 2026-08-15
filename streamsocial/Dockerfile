@@ -1,0 +1,227 @@
+# StreamSocial full stack: 3-broker Kafka (KRaft) + UI + Spring Boot API + scalable consumers
+#
+# Prerequisites:
+#   - streamsocial/backend/api/         (Spring Boot API application with pom.xml)
+#   - streamsocial/backend/consumer/    (Spring Boot Consumer application with pom.xml)
+#
+# Usage (from repo root):
+#   docker compose up -d --build
+#   docker compose up -d --scale kafka-consumer=3
+#   docker compose logs -f kafka-consumer
+#   docker compose down
+#
+# Demo:
+#   1. POST http://localhost:8000/api/events/bulk/generate
+#   2. GET  http://localhost:8000/api/metrics   (watch total_lag)
+#   3. Scale kafka-consumer and watch lag drain
+#   4. View Kafka UI at http://localhost:8080
+
+x-backend-env: &backend-env
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+  SPRING_KAFKA_CONSUMER_GROUP_ID: streamsocial_event_consumers
+  SPRING_KAFKA_CONSUMER_AUTO_OFFSET_RESET: earliest
+  SPRING_KAFKA_CONSUMER_MAX_POLL_RECORDS: "50"
+  SPRING_KAFKA_PRODUCER_LINGER_MS: "50"
+  SPRING_KAFKA_PRODUCER_BATCH_SIZE: "32768"
+  SPRING_KAFKA_PRODUCER_COMPRESSION_TYPE: gzip
+  LOGGING_LEVEL_ROOT: INFO
+  LOGGING_LEVEL_COM_STREAMSOCIAL: DEBUG
+  # Demo partitions (enough for multi-replica scale; override as needed)
+  PARTITIONS_USER_ACTIONS: "24"
+  PARTITIONS_CONTENT_INTERACTIONS: "12"
+  PARTITIONS_SYSTEM_EVENTS: "6"
+  KAFKA_REPLICATION_FACTOR: "3"
+  # Consumer configuration
+  CONSUMER_PROCESSING_DELAY_MS: "5"
+  CONSUMER_LAG_LOG_INTERVAL_SEC: "5"
+
+x-java-defaults: &java-defaults
+  JAVA_TOOL_OPTIONS: "-XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+ParallelRefProcEnabled"
+  SPRING_APPLICATION_NAME: streamsocial-service
+
+services:
+  kafka-1:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka-broker-1
+    ports:
+      - "9092:9092"
+    environment:
+      CLUSTER_ID: 'a0UJbkzkQs6CMwzZHHZutA=='
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka-1:29093,2@kafka-2:29093,3@kafka-3:29093'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka-1:29092,CONTROLLER://kafka-1:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_LOG_DIRS: '/var/lib/kafka/data'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka_1_data:/var/lib/kafka/data
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  kafka-2:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka-broker-2
+    ports:
+      - "9093:9093"
+    environment:
+      CLUSTER_ID: 'a0UJbkzkQs6CMwzZHHZutA=='
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka-1:29093,2@kafka-2:29093,3@kafka-3:29093'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka-2:29092,CONTROLLER://kafka-2:29093,PLAINTEXT_HOST://0.0.0.0:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka-2:29092,PLAINTEXT_HOST://localhost:9093'
+      KAFKA_LOG_DIRS: '/var/lib/kafka/data'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka_2_data:/var/lib/kafka/data
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9093"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  kafka-3:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka-broker-3
+    ports:
+      - "9094:9094"
+    environment:
+      CLUSTER_ID: 'a0UJbkzkQs6CMwzZHHZutA=='
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka-1:29093,2@kafka-2:29093,3@kafka-3:29093'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka-3:29092,CONTROLLER://kafka-3:29093,PLAINTEXT_HOST://0.0.0.0:9094'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka-3:29092,PLAINTEXT_HOST://localhost:9094'
+      KAFKA_LOG_DIRS: '/var/lib/kafka/data'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka_3_data:/var/lib/kafka/data
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9094"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: ''
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    networks:
+      - kafka-network
+
+  backend-api:
+    build:
+      context: ./backend/api
+      dockerfile: Dockerfile
+    container_name: streamsocial-api
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *backend-env
+      JAVA_TOOL_OPTIONS: "-XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+ParallelRefProcEnabled"
+      SPRING_APPLICATION_NAME: streamsocial-service
+      SERVER_PORT: "8000"
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_KAFKA_PRODUCER_ACKS: all
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  # Horizontally scalable consumer workers (same SPRING_KAFKA_CONSUMER_GROUP_ID).
+  # Scale with: docker compose up -d --scale kafka-consumer=N
+  kafka-consumer:
+    build:
+      context: ./backend/consumer
+      dockerfile: Dockerfile
+    container_name: streamsocial-consumer
+    environment:
+      <<: *backend-env
+      JAVA_TOOL_OPTIONS: "-XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+ParallelRefProcEnabled"
+      SPRING_APPLICATION_NAME: streamsocial-service
+      SPRING_PROFILES_ACTIVE: docker,consumer
+      SPRING_KAFKA_CONSUMER_ENABLE_AUTO_COMMIT: "true"
+      SPRING_KAFKA_CONSUMER_AUTO_COMMIT_INTERVAL_MS: "5000"
+      SPRING_KAFKA_LISTENER_CONCURRENCY: "3"
+      # Allows multiple replicas to consume from same group
+      SPRING_KAFKA_LISTENER_TYPE: batch
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      backend-api:
+        condition: service_started
+    networks:
+      - kafka-network
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+volumes:
+  kafka_1_data:
+  kafka_2_data:
+  kafka_3_data:
+
+networks:
+  kafka-network:
+    driver: bridge

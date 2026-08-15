@@ -1,0 +1,68 @@
+spring:
+  application:
+    name: streamsocial-consumer
+  
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    
+    consumer:
+      group-id: ${SPRING_KAFKA_CONSUMER_GROUP_ID:streamsocial_event_consumers}
+      auto-offset-reset: ${SPRING_KAFKA_CONSUMER_AUTO_OFFSET_RESET:earliest}
+      enable-auto-commit: ${SPRING_KAFKA_CONSUMER_ENABLE_AUTO_COMMIT:true}
+      auto-commit-interval-ms: ${SPRING_KAFKA_CONSUMER_AUTO_COMMIT_INTERVAL_MS:5000}
+      max-poll-records: ${SPRING_KAFKA_CONSUMER_MAX_POLL_RECORDS:50}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring:
+          json:
+            trusted:
+              packages: "com.streamsocial.*"
+    
+    listener:
+      type: ${SPRING_KAFKA_LISTENER_TYPE:batch}
+      concurrency: ${SPRING_KAFKA_LISTENER_CONCURRENCY:3}
+      poll-timeout: 30000
+      ack-mode: ${SPRING_KAFKA_LISTENER_ACK_MODE:BATCH}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  level:
+    root: ${LOGGING_LEVEL_ROOT:INFO}
+    com.streamsocial: ${LOGGING_LEVEL_COM_STREAMSOCIAL:DEBUG}
+    org.springframework.kafka: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+logging:
+  level:
+    root: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: consumer
+
+# Consumer-specific overrides
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
