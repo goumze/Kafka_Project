@@ -1,0 +1,96 @@
+spring:
+  application:
+    name: uberlite-lesson-01
+  
+  # DataSource Configuration for PostgreSQL (Docker)
+  datasource:
+    url: jdbc:postgresql://postgres:5432/postgres
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
+      connection-timeout: 20000
+      idle-timeout: 30000
+
+  # JPA/Hibernate Configuration
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQL10Dialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+
+  # Kafka Configuration (Docker)
+  kafka:
+    bootstrap-servers: kafka1:9092,kafka2:9092,kafka3:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      compression-type: gzip
+      properties:
+        linger.ms: 10
+        batch.size: 32768
+    consumer:
+      bootstrap-servers: kafka1:9092,kafka2:9092,kafka3:9092
+      group-id: uberlite-lesson-01
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: true
+      auto-commit-interval-ms: 1000
+      properties:
+        spring.json.trusted.packages: "*"
+        max.poll.records: 500
+
+# Server Configuration
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+
+# Actuator Configuration (Metrics & Health)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      simple:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
+      environment: docker
+
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.uberlite: INFO
+    org.springframework.kafka: INFO
+    org.hibernate: WARN
+
+# Application-specific Configuration
+app:
+  mode: both
+  load-generator:
+    num-drivers: 1000
+    events-per-second: 3000
+  metrics:
+    report-interval-seconds: 10
