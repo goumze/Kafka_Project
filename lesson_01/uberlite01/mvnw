@@ -1,0 +1,16 @@
+#!/bin/bash
+# Maven Wrapper Script for Unix/Linux/Mac
+
+MAVEN_VERSION="3.9.6"
+MAVEN_HOME="${MAVEN_HOME:-.mvn}"
+
+# Download Maven if not present
+if [ ! -d "$MAVEN_HOME" ]; then
+    mkdir -p "$MAVEN_HOME"
+    MAVEN_URL="https://archive.apache.org/dist/maven/maven-3/$MAVEN_VERSION/binaries/apache-maven-$MAVEN_VERSION-bin.tar.gz"
+    echo "Downloading Maven $MAVEN_VERSION..."
+    curl -s "$MAVEN_URL" | tar xz -C "$MAVEN_HOME" --strip-components=1
+fi
+
+# Run Maven
+exec "$MAVEN_HOME/bin/mvn" "$@"
