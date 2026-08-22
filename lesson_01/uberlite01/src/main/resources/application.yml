@@ -4,18 +4,19 @@ spring:
   
   # DataSource Configuration for PostgreSQL
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:postgres}
-    username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:postgres}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:myapp_db}?sslmode=disable&options=-c%20TimeZone=UTC
+    username: ${DB_USER:admin}
+    password: ${DB_PASSWORD:admin123}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
       connection-timeout: 20000
+      connection-init-sql: SET TIME ZONE 'UTC'
 
   # JPA/Hibernate Configuration
   jpa:
-    database-platform: org.hibernate.dialect.PostgreSQL10Dialect
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: validate
     show-sql: false
@@ -23,12 +24,13 @@ spring:
       hibernate:
         jdbc:
           batch_size: 20
+          time_zone: UTC
         order_inserts: true
         order_updates: true
 
   # Kafka Configuration
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9094,localhost:9096}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -39,7 +41,7 @@ spring:
         linger.ms: 10
         batch.size: 32768
     consumer:
-      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9094,localhost:9096}
       group-id: ${KAFKA_CONSUMER_GROUP:uberlite-lesson-01}
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
@@ -52,7 +54,7 @@ spring:
 
 # Server Configuration
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8091}
   servlet:
     context-path: /api
   tomcat:

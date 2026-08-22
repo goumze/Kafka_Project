@@ -4,19 +4,20 @@ spring:
   
   # DataSource Configuration for PostgreSQL (Docker)
   datasource:
-    url: jdbc:postgresql://postgres:5432/postgres
-    username: postgres
-    password: postgres
+    url: jdbc:postgresql://postgres:5432/myapp_db?sslmode=disable&options=-c%20TimeZone=UTC
+    username: admin
+    password: admin123
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 30
       minimum-idle: 5
       connection-timeout: 20000
       idle-timeout: 30000
+      connection-init-sql: SET TIME ZONE 'UTC'
 
   # JPA/Hibernate Configuration
   jpa:
-    database-platform: org.hibernate.dialect.PostgreSQL10Dialect
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: validate
     show-sql: false
@@ -24,6 +25,7 @@ spring:
       hibernate:
         jdbc:
           batch_size: 20
+          time_zone: UTC
         order_inserts: true
         order_updates: true
 
@@ -53,7 +55,7 @@ spring:
 
 # Server Configuration
 server:
-  port: 8080
+  port: 8091
   servlet:
     context-path: /api
   tomcat:
