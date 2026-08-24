@@ -4,7 +4,7 @@ spring:
   
   # DataSource Configuration for PostgreSQL
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:myapp_db}?sslmode=disable&options=-c%20TimeZone=UTC
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:myapp_db}?sslmode=disable&timezone=UTC
     username: ${DB_USER:admin}
     password: ${DB_PASSWORD:admin123}
     driver-class-name: org.postgresql.Driver
@@ -30,7 +30,7 @@ spring:
 
   # Kafka Configuration
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9094,localhost:9096}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094,localhost:9096,localhost:9098}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -41,7 +41,7 @@ spring:
         linger.ms: 10
         batch.size: 32768
     consumer:
-      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9094,localhost:9096}
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094,localhost:9096,localhost:9098}
       group-id: ${KAFKA_CONSUMER_GROUP:uberlite-lesson-01}
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer

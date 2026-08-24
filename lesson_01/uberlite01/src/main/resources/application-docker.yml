@@ -4,7 +4,7 @@ spring:
   
   # DataSource Configuration for PostgreSQL (Docker)
   datasource:
-    url: jdbc:postgresql://postgres:5432/myapp_db?sslmode=disable&options=-c%20TimeZone=UTC
+    url: jdbc:postgresql://postgres:5432/myapp_db?sslmode=disable&timezone=UTC
     username: admin
     password: admin123
     driver-class-name: org.postgresql.Driver
