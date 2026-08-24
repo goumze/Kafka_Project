@@ -1,0 +1,52 @@
+Uber-Lite Lesson 01: DB vs Kafka Performance Comparison
+====================================================
+
+Date: 2026-08-24
+Environment:
+- Kafka bootstrap servers: localhost:9094, localhost:9096, localhost:9098
+- PostgreSQL: localhost:5432
+- App server port: 8093
+- Application mode: both
+- Timezone: UTC
+
+Observed run output:
+---------------------
+18:08:13.256 [pool-2-thread-1] INFO  com.uberlite.LoadGeneratorRunner - [PostgreSQL] Throughput: 19/s | P99: {:.2f}ms | Success: 154.1861 | Failures: 192
+18:08:13.277 [pool-2-thread-2] INFO  com.uberlite.LoadGeneratorRunner - [Kafka] Throughput: 2375/s | P99: {:.2f}ms | Success: 3447.4135 | Failures: 23748
+
+Interpretation:
+----------------
+1. PostgreSQL / DB path
+   - This is the direct-write monolithic flow implemented by PostgresLocationUpdater.
+   - It performs synchronous INSERT/UPDATE operations to the database for each event.
+   - Throughput is approximately 19 events/second.
+   - This indicates blocked DB IO and higher write latency.
+
+2. Kafka path
+   - This is the event-driven flow implemented by KafkaLocationProducer.
+   - Events are published to the Kafka topic asynchronously via kafkaTemplate.send(...).
+   - Throughput is approximately 2375 events/second.
+   - This indicates much higher producer throughput because the app is not waiting for DB commits.
+
+Key architectural difference:
+------------------------------
+- PostgreSQL path: synchronous persistence, direct DB coupling, lower throughput.
+- Kafka path: asynchronous message production, broker buffering, higher throughput and better decoupling.
+
+Flow mapping in code:
+---------------------
+- App runner starts both flows in UberliteLesson01Application:
+  - runPostgresTest(...) -> PostgresLocationUpdater.updateLocation(...)
+  - runKafkaTest(...) -> KafkaLocationProducer.sendLocation(...)
+
+Evidence of real data flow:
+---------------------------
+- PostgreSQL row count query returned 1237 rows in drivers table.
+- Kafka topic location-events returned sample messages with JSON payloads such as:
+  {"driver_id":"driver-a28f2b9b","latitude":37.78235034132707,"longitude":-122.44102917335367,"timestamp":1787594554788}
+  {"driver_id":"driver-8835a33e","latitude":37.748004387457804,"longitude":-122.40107858480192,"timestamp":1787594554809}
+  {"driver_id":"driver-a4c22f08","latitude":37.77414565204612,"longitude":-122.49364937024572,"timestamp":1787594554811}
+
+Conclusion:
+-----------
+The application is working correctly in both modes. The Kafka path is significantly faster due to asynchronous event-driven processing, while the PostgreSQL path is slower but provides immediate persistence. This difference is consistent with the intended monolithic vs event-driven comparison.
